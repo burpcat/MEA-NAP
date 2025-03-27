@@ -11,7 +11,7 @@ clearvars -except InputParamsFilePath
 close all 
 
 % Change to MEANAP folder 
-MEANAPscriptPath = which('MEApipeline.m');l
+MEANAPscriptPath = which('MEApipeline.m');
 MEANAPfolder = fileparts(MEANAPscriptPath);
 cd(MEANAPfolder)
 
@@ -130,9 +130,7 @@ addpath('Images')
 % The rest of the MEApipeline.m runs automatically. Do not change after this line
 % unless you are an expert user.
 % Define output folder names
-formatOut = 'ddmmmyyyy'; 
-Params.Date = datestr(now,formatOut); 
-clear formatOut
+Params.Date = datestr(now,'ddmmmyyyy'); 
 
 if Params.guiMode ~= 1
     AdvancedSettings
