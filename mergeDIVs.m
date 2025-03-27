@@ -40,8 +40,7 @@ function mergeDIVs(divFolders, outputFolder, varargin)
 %   options.verbose = true;
 %   mergeDIVs(divFolders, outputFolder, options);
 %
-% Author: Generated with Claude Code
-% Date: March 2025
+% Author: Avinash
 
 %% Parse input arguments
 if nargin < 2
@@ -257,7 +256,10 @@ if options.copySpikes
                         mkdir(targetRecFolder);
                         
                         % Copy all check images
-                        copyfile(fullfile(sourceRecFolder, '*.png'), targetRecFolder);
+                        checkImages = dir(fullfile(sourceRecFolder, '*.png'));
+                        for img = 1:length(checkImages)
+                            copyfile(fullfile(sourceRecFolder, checkImages(img).name), targetRecFolder);
+                        end
                     end
                 end
             end
@@ -320,13 +322,7 @@ if options.mergeDivCSVs
             combinedCSV = sortrows(combinedCSV, 'DIV');
         end
         
-        % Generate output filename - use "div" + DIV numbers for naming
-        [~, outputName] = fileparts(outputFolder);
-        if isempty(outputName)
-            outputName = 'MergedDIVs';
-        end
-        
-        % Use consistent naming convention for the div CSV file
+        % Generate output filename
         csvOutputFile = fullfile(outputFolder, 'div_merged.csv');
         
         % Check if we need to match the original folder's CSV header format
@@ -427,148 +423,301 @@ if options.mergeDivCSVs
     end
 end
 
-%% Merge parameter files
+%% Generate parameter files
 if options.verbose
-    fprintf('\nMerging parameter files...\n');
+    fprintf('\nGenerating parameter files...\n');
 end
 
-% Collect parameters from all valid folders
-paramStructs = cell(1, length(validFolders));
-paramFileNames = cell(1, length(validFolders));
+% Get output folder name for file naming
+[~, outputFolderName] = fileparts(outputFolder);
+if isempty(outputFolderName)
+    outputFolderName = 'MergedDIVs';
+end
+
+%% Merge Parameter Files
+
+% Load all parameter files
+allParams = cell(1, length(validFolders));
 for i = 1:length(validFolders)
     paramFiles = dir(fullfile(validFolders{i}, 'Parameters_*.mat'));
     if ~isempty(paramFiles)
-        try
-            % Load the first parameter file found
-            paramFileNames{i} = paramFiles(1).name;
-            paramData = load(fullfile(validFolders{i}, paramFiles(1).name));
-            if isfield(paramData, 'Params')
-                paramStructs{i} = paramData.Params;
-            else
-                % Try to find the parameter struct
-                fields = fieldnames(paramData);
-                for j = 1:length(fields)
-                    if isstruct(paramData.(fields{j}))
-                        paramStructs{i} = paramData.(fields{j});
-                        break;
-                    end
-                end
-            end
-        catch ME
-            warning('Error loading parameter file from %s: %s', validFolders{i}, ME.message);
-            paramStructs{i} = [];
-            paramFileNames{i} = '';
+        paramData = load(fullfile(validFolders{i}, paramFiles(1).name));
+        if isfield(paramData, 'Params')
+            allParams{i} = paramData.Params;
+        else
+            warning('Parameters not found in %s - skipping', paramFiles(1).name);
         end
-    else
-        paramStructs{i} = [];
-        paramFileNames{i} = '';
     end
 end
 
-% Remove empty parameter structs
-validIndices = ~cellfun(@isempty, paramStructs);
-paramStructs = paramStructs(validIndices);
-paramFileNames = paramFileNames(validIndices);
-
-if ~isempty(paramStructs)
-    % Choose the most complete parameter set
-    paramFieldCounts = cellfun(@(x) numel(fieldnames(x)), paramStructs);
-    [~, mostCompleteIdx] = max(paramFieldCounts);
-    mergedParams = paramStructs{mostCompleteIdx};
+% Start with the first one as the base
+if ~isempty(allParams) && ~isempty(allParams{1})
+    Params = allParams{1};
     
-    % Update paths
-    mergedParams.outputDataFolder = outputFolder;
+    % Update folder-specific information
+    Params.outputDataFolder = outputFolder;
+    Params.outputDataFolderName = outputFolderName;
+    Params.DivNm = divNumbers;
+    Params.spikeDetectedData = ''; 
+    Params.startAnalysisStep = 1;
+    Params.rawData = '';
+    Params.guiMode = 0;
+    Params.HomeDir = fileparts(mfilename('fullpath'));
     
-    % Check if we should use specific suffix from an existing parameter file
-    [~, outputFolderName] = fileparts(outputFolder);
-    if isempty(outputFolderName)
-        outputFolderName = 'MergedDIVs';
+    % Set spreadSheetFileName to the merged CSV
+    divCsvPath = fullfile(outputFolder, 'div_merged.csv');
+    if exist(divCsvPath, 'file')
+        Params.spreadSheetFileName = divCsvPath;
     end
     
-    % Check if we should preserve suffix from existing parameter files
-    suffixToUse = '_nap'; % Default suffix
-    for i = 1:length(paramFileNames)
-        % Check if the parameter file has a consistent naming pattern
-        paramNameMatch = regexp(paramFileNames{i}, 'Parameters_(.+)\.mat', 'tokens');
-        if ~isempty(paramNameMatch) && ~isempty(paramNameMatch{1})
-            existingSuffix = paramNameMatch{1}{1};
-            
-            % If suffix ends with "_nap", use that exact pattern
-            if endsWith(existingSuffix, '_nap')
-                % Check if this suffix also contains the output folder name
-                folderNamePattern = [outputFolderName '_nap'];
-                if contains(existingSuffix, outputFolderName)
-                    suffixToUse = existingSuffix;
-                    break;
-                else
-                    suffixToUse = [outputFolderName '_nap'];
-                end
-            end
-        end
-    end
-    
-    mergedParams.outputDataFolderName = outputFolderName;
-    
-    % Update DIV information
-    mergedParams.DivNm = divNumbers;
-    
-    % Save merged parameters with the determined suffix
-    paramMatFile = fullfile(outputFolder, ['Parameters_' suffixToUse '.mat']);
-    paramCSVFile = fullfile(outputFolder, ['Parameters_' suffixToUse '.csv']);
-    
-    % Save MAT file
-    Params = mergedParams; % Must use this variable name for compatibility
+    % Save the merged MAT file
+    paramMatFile = fullfile(outputFolder, ['Parameters_' outputFolderName '.mat']);
     save(paramMatFile, 'Params');
     
-    % Create parameter CSV
-    paramNames = fieldnames(mergedParams);
-    paramValues = cell(length(paramNames), 1);
+    % Create the CSV file using all parameter files to ensure all fields are captured
+    % This part will focus on merging channel and coordinate data correctly
     
-    for i = 1:length(paramNames)
-        val = mergedParams.(paramNames{i});
-        if isempty(val)
-            paramValues{i} = '';
-        elseif ischar(val)
-            paramValues{i} = val;
-        elseif isnumeric(val) && isscalar(val)
-            paramValues{i} = num2str(val);
-        elseif iscell(val)
-            % Try to convert cell to string representation safely
+    % First, collect all channel and coordinate data from all parameter files
+    allChannelData = {};
+    allCoordData = {};
+    
+    for i = 1:length(validFolders)
+        % Load the CSV parameter file
+        paramCSVFiles = dir(fullfile(validFolders{i}, 'Parameters_*.csv'));
+        if ~isempty(paramCSVFiles)
             try
-                % Check if all elements are strings
-                allChars = true;
-                for j = 1:numel(val)
-                    if ~ischar(val{j}) && ~isstring(val{j})
-                        allChars = false;
-                        break;
+                % Read the CSV file keeping original variable names
+                opts = detectImportOptions(fullfile(validFolders{i}, paramCSVFiles(1).name));
+                opts.PreserveVariableNames = true;
+                T = readtable(fullfile(validFolders{i}, paramCSVFiles(1).name), opts);
+                
+                % Find all channel and coordinate columns
+                colNames = T.Properties.VariableNames;
+                channelCols = {};
+                coordCols = {};
+                
+                for j = 1:length(colNames)
+                    if strncmp(colNames{j}, 'channels_', 9)
+                        channelCols{end+1} = colNames{j};
+                    elseif strncmp(colNames{j}, 'coords_', 7)
+                        coordCols{end+1} = colNames{j};
                     end
                 end
                 
-                if allChars
-                    paramValues{i} = strjoin(val, ', ');
-                else
-                    paramValues{i} = '<cell array>';
+                % Store the columns and their data
+                allChannelData{end+1} = {T, channelCols};
+                allCoordData{end+1} = {T, coordCols};
+                
+                if options.verbose
+                    fprintf('  Found %d channel and %d coordinate columns in %s\n', ...
+                        length(channelCols), length(coordCols), validFolders{i});
                 end
-            catch
-                paramValues{i} = '<cell array>';
+            catch ME
+                warning('Could not read parameter CSV file from %s: %s', validFolders{i}, ME.message);
             end
-        elseif isnumeric(val) && ~isscalar(val)
-            paramValues{i} = ['[' strjoin(arrayfun(@num2str, val, 'UniformOutput', false), ', ') ']'];
-        else
-            paramValues{i} = '<complex data>';
         end
     end
     
-    paramTable = table(paramNames, paramValues, 'VariableNames', {'Parameter', 'Value'});
+    % Create a new struct for the CSV export
+    % This will contain all fields from the original parameter files
+    tableStruct = struct();
+    
+    % First, convert the Params struct to a basic structure for the CSV
+    paramFields = fieldnames(Params);
+    for i = 1:length(paramFields)
+        fieldName = paramFields{i};
+        if ~strcmp(fieldName, 'channels') && ~strcmp(fieldName, 'coords')
+            % Handle standard fields
+            if isstruct(Params.(fieldName))
+                % Expand struct fields with _ separator
+                subfields = fieldnames(Params.(fieldName));
+                for j = 1:length(subfields)
+                    if isscalar(Params.(fieldName).(subfields{j}))
+                        tableStruct.([fieldName '_' subfields{j}]) = Params.(fieldName).(subfields{j});
+                    end
+                end
+            elseif iscell(Params.(fieldName))
+                % Handle cell arrays - make them indexed fields
+                for j = 1:length(Params.(fieldName))
+                    if j <= length(Params.(fieldName))
+                        if ischar(Params.(fieldName){j})
+                            tableStruct.([fieldName '_' num2str(j)]) = Params.(fieldName){j};
+                        elseif isnumeric(Params.(fieldName){j}) && isscalar(Params.(fieldName){j})
+                            tableStruct.([fieldName '_' num2str(j)]) = Params.(fieldName){j};
+                        end
+                    end
+                end
+            elseif isnumeric(Params.(fieldName)) && length(Params.(fieldName)) > 1
+                % Handle numeric arrays - make them indexed fields
+                for j = 1:length(Params.(fieldName))
+                    tableStruct.([fieldName '_' num2str(j)]) = Params.(fieldName)(j);
+                end
+            else
+                % Handle scalar values
+                tableStruct.(fieldName) = Params.(fieldName);
+            end
+        end
+    end
+    
+    % Now, create a complete set of channel and coordinate fields
+    % Merge from all parameter files, ensuring none are missed
+    
+    % Initialize default values
+    % First get the maximum indices for channels and coords from all folders
+    maxChannelRow = 0;
+    maxChannelCol = 0;
+    maxCoordRow = 0;
+    maxCoordCol = 0;
+    
+    % Pattern for extracting row and column from field names like "channels_1_2" or "coords_3_4"
+    channelPattern = 'channels_(\d+)_(\d+)';
+    coordPattern = 'coords_(\d+)_(\d+)';
+    
+    % Scan through all parameter files to find the maximum indices
+    for i = 1:length(allChannelData)
+        if ~isempty(allChannelData{i})
+            channelCols = allChannelData{i}{2};
+            for j = 1:length(channelCols)
+                tokens = regexp(channelCols{j}, channelPattern, 'tokens');
+                if ~isempty(tokens) && ~isempty(tokens{1})
+                    row = str2double(tokens{1}{1});
+                    col = str2double(tokens{1}{2});
+                    maxChannelRow = max(maxChannelRow, row);
+                    maxChannelCol = max(maxChannelCol, col);
+                end
+            end
+        end
+    end
+    
+    for i = 1:length(allCoordData)
+        if ~isempty(allCoordData{i})
+            coordCols = allCoordData{i}{2};
+            for j = 1:length(coordCols)
+                tokens = regexp(coordCols{j}, coordPattern, 'tokens');
+                if ~isempty(tokens) && ~isempty(tokens{1})
+                    row = str2double(tokens{1}{1});
+                    col = str2double(tokens{1}{2});
+                    maxCoordRow = max(maxCoordRow, row);
+                    maxCoordCol = max(maxCoordCol, col);
+                end
+            end
+        end
+    end
+    
+    % Ensure we have at least 48 rows for channels
+    maxChannelRow = max(maxChannelRow, 48);
+    maxChannelCol = max(maxChannelCol, 16);
+    maxCoordRow = max(maxCoordRow, 48);
+    maxCoordCol = max(maxCoordCol, 32);
+    
+    % Initialize all channel fields with default values
+    for i = 1:maxChannelRow
+        for j = 1:maxChannelCol
+            tableStruct.(['channels_' num2str(i) '_' num2str(j)]) = 0;
+        end
+    end
+    
+    % Initialize all coordinate fields with default values
+    % For X coordinates (j <= 16)
+    for i = 1:maxCoordRow
+        for j = 1:16
+            tableStruct.(['coords_' num2str(i) '_' num2str(j)]) = (j-1) * 2.66666666666667;
+        end
+    end
+    
+    % For Y coordinates (j > 16)
+    for i = 1:maxCoordRow
+        for j = 17:maxCoordCol
+            tableStruct.(['coords_' num2str(i) '_' num2str(j)]) = (i-1) * 2.66666666666667;
+        end
+    end
+    
+    % Now overlay the actual data from all parameter files
+    % We'll process them in DIV order, so later DIVs override earlier ones if there's a conflict
+    
+    % First, prepare a mapping of DIV folders to their row indices in the parameter file
+    divToRowIndices = containers.Map('KeyType', 'double', 'ValueType', 'any');
+    
+    % The default is to map DIV1 to rows 1-24, DIV2 to rows 25-48, etc.
+    rowsPerDIV = min(24, floor(maxChannelRow / length(divNumbers)));
+    
+    % Create the mapping
+    for divIdx = 1:length(divNumbers)
+        divToRowIndices(divNumbers(divIdx)) = ((divIdx-1) * rowsPerDIV + 1):(divIdx * rowsPerDIV);
+    end
+    
+    % Now overlay each DIV's data to its corresponding rows
+    for folderIdx = 1:length(validFolders)
+        if ~isempty(allChannelData{folderIdx}) && ~isempty(allCoordData{folderIdx})
+            div = divNumbers(folderIdx);
+            rowIndices = divToRowIndices(div);
+            
+            % Get the channel and coordinate data for this DIV
+            channelData = allChannelData{folderIdx}{1};
+            channelCols = allChannelData{folderIdx}{2};
+            
+            coordData = allCoordData{folderIdx}{1};
+            coordCols = allCoordData{folderIdx}{2};
+            
+            % Map this DIV's channels to the appropriate rows in our final structure
+            for j = 1:length(channelCols)
+                % Extract row and column from field name
+                tokens = regexp(channelCols{j}, channelPattern, 'tokens');
+                if ~isempty(tokens) && ~isempty(tokens{1})
+                    sourceRow = str2double(tokens{1}{1});
+                    col = str2double(tokens{1}{2});
+                    
+                    % Map source row to target row using modulo arithmetic
+                    % to handle the case where the source has more rows than rowsPerDIV
+                    localRowIdx = mod(sourceRow - 1, length(rowIndices)) + 1;
+                    targetRow = rowIndices(localRowIdx);
+                    
+                    % Create the target field name
+                    targetField = ['channels_' num2str(targetRow) '_' num2str(col)];
+                    
+                    % Get the value from the source
+                    if ismember(channelCols{j}, channelData.Properties.VariableNames)
+                        tableStruct.(targetField) = channelData.(channelCols{j})(1);
+                    end
+                end
+            end
+            
+            % Map this DIV's coordinates to the appropriate rows
+            for j = 1:length(coordCols)
+                % Extract row and column from field name
+                tokens = regexp(coordCols{j}, coordPattern, 'tokens');
+                if ~isempty(tokens) && ~isempty(tokens{1})
+                    sourceRow = str2double(tokens{1}{1});
+                    col = str2double(tokens{1}{2});
+                    
+                    % Map source row to target row
+                    localRowIdx = mod(sourceRow - 1, length(rowIndices)) + 1;
+                    targetRow = rowIndices(localRowIdx);
+                    
+                    % Create the target field name
+                    targetField = ['coords_' num2str(targetRow) '_' num2str(col)];
+                    
+                    % Get the value from the source
+                    if ismember(coordCols{j}, coordData.Properties.VariableNames)
+                        tableStruct.(targetField) = coordData.(coordCols{j})(1);
+                    end
+                end
+            end
+        end
+    end
+    
+    % Create table and write to CSV
+    paramTable = struct2table(tableStruct, 'AsArray', true);
+    paramCSVFile = fullfile(outputFolder, ['Parameters_' outputFolderName '.csv']);
     writetable(paramTable, paramCSVFile);
     
     if options.verbose
-        fprintf('✓ Created merged parameter files:\n');
+        fprintf('✓ Successfully created parameter files\n');
         fprintf('  MAT file: %s\n', paramMatFile);
         fprintf('  CSV file: %s\n', paramCSVFile);
     end
 else
-    warning('No parameter files found to merge.');
+    warning('Could not find a valid parameter file in any of the input folders.');
 end
 
 %% Copy channel layout file
@@ -590,9 +739,8 @@ if options.mergeExperiments
         fprintf('\nCreating experiment mat files...\n');
     end
     
-    % First check if source folders have ExperimentMatFiles and determine naming pattern
+    % First check if source folders have ExperimentMatFiles
     hasExpMatFiles = false;
-    matFileSuffix = '_nap';  % Default suffix
     
     for i = 1:length(validFolders)
         sourceExpFolder = fullfile(validFolders{i}, 'ExperimentMatFiles');
@@ -604,97 +752,112 @@ if options.mergeExperiments
                 fprintf('  Found ExperimentMatFiles folder in: %s\n', validFolders{i});
                 fprintf('  Contains %d .mat files\n', length(matFiles));
             end
+        end
+    end
+    
+    if hasExpMatFiles
+        % Get list of all spike files to create experiment mat files for each one
+        allSpikeFiles = {};
+        for i = 1:length(validFolders)
+            spikeFolder = fullfile(validFolders{i}, '1_SpikeDetection', '1A_SpikeDetectedData');
+            if exist(spikeFolder, 'dir')
+                spikeFiles = dir(fullfile(spikeFolder, '*_spikes.mat'));
+                for j = 1:length(spikeFiles)
+                    [~, recordingName, ~] = fileparts(spikeFiles(j).name);
+                    recordingName = regexprep(recordingName, '_spikes$', ''); % Remove _spikes suffix
+                    allSpikeFiles{end+1} = recordingName;
+                end
+            end
+        end
+        
+        % Remove duplicates
+        allSpikeFiles = unique(allSpikeFiles);
+        
+        % Create placeholder .mat files for each recording
+        expFileCounter = 0;
+        
+        if options.verbose
+            fprintf('  Creating %d experiment mat files\n', length(allSpikeFiles));
+        end
+        
+        for i = 1:length(allSpikeFiles)
+            recordingName = allSpikeFiles{i};
+            outputMatFile = fullfile(experimentMatFolder, [recordingName '_' outputFolderName '.mat']);
             
-            % Try to extract suffix pattern from existing files
-            if ~isempty(matFiles)
-                for j = 1:min(5, length(matFiles))  % Check up to 5 files for pattern
-                    [~, fileName, ~] = fileparts(matFiles(j).name);
-                    % Get pattern after recording name
-                    parts = strsplit(fileName, '_');
-                    if length(parts) >= 3  % Assuming format like NGN2_DIV38_A1_suffix.mat
-                        potentialSuffix = parts{end};
-                        if strcmp(potentialSuffix, 'nap') || endsWith(potentialSuffix, '_nap')
-                            % Found a pattern like merger3855_nap
-                            for k = length(parts)-1:-1:2  % Check if there are more parts to the suffix
-                                testSuffix = [parts{k} '_' potentialSuffix];
-                                if any(cellfun(@(x) endsWith(x, ['_' testSuffix]), {matFiles.name}))
-                                    potentialSuffix = testSuffix;
-                                else
-                                    break;
-                                end
+            % Check if we can find a matching experiment file in any of the source folders
+            sourceMatFile = '';
+            sourceInfo = [];
+            
+            for j = 1:length(validFolders)
+                sourceExpFolder = fullfile(validFolders{j}, 'ExperimentMatFiles');
+                if exist(sourceExpFolder, 'dir')
+                    % Look for files matching this recording name
+                    expFiles = dir(fullfile(sourceExpFolder, [recordingName '_*.mat']));
+                    if ~isempty(expFiles)
+                        sourceMatFile = fullfile(sourceExpFolder, expFiles(1).name);
+                        try
+                            sourceData = load(sourceMatFile);
+                            if isfield(sourceData, 'Info')
+                                sourceInfo = sourceData.Info;
+                                break; % Found it, exit loop
                             end
-                            matFileSuffix = potentialSuffix;
-                            if options.verbose
-                                fprintf('  Found suffix pattern: %s\n', matFileSuffix);
-                            end
-                            break;
+                        catch
+                            % Continue to next folder
                         end
                     end
                 end
             end
-        else
-            if options.verbose
-                fprintf('  No ExperimentMatFiles folder found in: %s\n', validFolders{i});
+            
+            % If we found a source, copy the Info structure
+            if ~isempty(sourceInfo)
+                % Update Info fields for the merged output
+                Info = sourceInfo;
+                Info.createdBy = 'mergeDIVs';
+                Info.dateCreated = datestr(now);
+                
+                % Save the file
+                save(outputMatFile, 'Info');
+                expFileCounter = expFileCounter + 1;
+            else
+                % Create a new Info struct with basic information
+                
+                % Check if we can extract DIV and group info from the filename
+                divMatch = regexp(recordingName, '(DIV|div)(\d+)', 'tokens', 'once');
+                if ~isempty(divMatch)
+                    divValue = str2double(divMatch{2});
+                else
+                    divValue = 0; % Default if DIV not found
+                end
+                
+                % Try to get group from pattern like NGN2_DIV38_A1
+                groupMatch = regexp(recordingName, '_([A-Z])(\d+)', 'tokens', 'once');
+                if ~isempty(groupMatch)
+                    groupValue = groupMatch{1};
+                else
+                    groupValue = 'unknown'; % Default group
+                end
+                
+                % Create a proper Info struct with the fields expected by MEA-NAP
+                Info = struct();
+                Info.FN = {recordingName};
+                Info.DIV = {divValue};
+                Info.Grp = {groupValue};
+                Info.createdBy = 'mergeDIVs';
+                Info.dateCreated = datestr(now);
+                
+                % Save the file
+                save(outputMatFile, 'Info');
+                expFileCounter = expFileCounter + 1;
             end
         end
-    end
-    
-    % Get output folder name for file naming
-    [~, outputFolderName] = fileparts(outputFolder);
-    if isempty(outputFolderName)
-        outputFolderName = 'merger_unknown';
-    end
-    
-    % Use the original suffix if found, otherwise use outputFolderName_nap
-    if ~strcmp(matFileSuffix, '_nap')
-        finalSuffix = matFileSuffix;
+        
+        if options.verbose
+            fprintf('✓ Created %d experiment mat files\n', expFileCounter);
+        end
     else
-        finalSuffix = [outputFolderName '_nap'];
-    end
-    
-    % Get list of all spike files to create experiment mat files for each one
-    allSpikeFiles = {};
-    for i = 1:length(validFolders)
-        spikeFolder = fullfile(validFolders{i}, '1_SpikeDetection', '1A_SpikeDetectedData');
-        if exist(spikeFolder, 'dir')
-            spikeFiles = dir(fullfile(spikeFolder, '*_spikes.mat'));
-            for j = 1:length(spikeFiles)
-                [~, recordingName, ~] = fileparts(spikeFiles(j).name);
-                recordingName = regexprep(recordingName, '_spikes$', ''); % Remove _spikes suffix
-                allSpikeFiles{end+1} = recordingName;
-            end
+        if options.verbose
+            fprintf('No ExperimentMatFiles folders found in any input folder.\n');
         end
-    end
-    
-    % Remove duplicates
-    allSpikeFiles = unique(allSpikeFiles);
-    
-    % Create placeholder .mat files for each recording
-    expFileCounter = 0;
-    
-    if options.verbose
-        fprintf('  Creating %d placeholder experiment mat files\n', length(allSpikeFiles));
-    end
-    
-    for i = 1:length(allSpikeFiles)
-        recordingName = allSpikeFiles{i};
-        outputMatFile = fullfile(experimentMatFolder, [recordingName '_' finalSuffix '.mat']);
-        
-        % Create a minimal placeholder struct with metadata
-        % This contains just enough to indicate this file was processed
-        expInfo = struct();
-        expInfo.recording = recordingName;
-        expInfo.createdBy = 'mergeDIVs';
-        expInfo.dateCreated = datestr(now);
-        expInfo.placeholder = true;
-        
-        % Save the placeholder file
-        save(outputMatFile, 'expInfo');
-        expFileCounter = expFileCounter + 1;
-    end
-    
-    if options.verbose
-        fprintf('✓ Created %d experiment mat files\n', expFileCounter);
     end
 end
 
@@ -707,23 +870,10 @@ if options.verbose
     fprintf('Merged data can now be used for further MEA-NAP analysis steps\n');
     fprintf('such as neuronal activity, edge thresholding, and network activity\n');
     fprintf('by using this folder as input for the MEApipeline.m function.\n\n');
-end
-
-end
-
-% Helper function to extract a DIV number from a folder name
-function divNum = extractDIVNumber(folderPath)
-[~, folderName] = fileparts(folderPath);
-
-% Try to match DIV followed by number
-divMatch = regexp(folderName, '(DIV|div)(\d+)', 'tokens');
-if ~isempty(divMatch) && ~isempty(divMatch{1})
-    if length(divMatch{1}) > 1
-        divNum = str2double(divMatch{1}{2}); % Get the number part
-    else
-        divNum = str2double(regexprep(divMatch{1}{1}, 'DIV|div', ''));
-    end
-else
-    divNum = 0; % Could not determine DIV number
+    
+    % Display command to run pipeline on merged data
+    paramFilePath = fullfile(outputFolder, ['Parameters_' outputFolderName '.mat']);
+    fprintf('To run MEApipeline on this merged data, use the following command:\n');
+    fprintf('  MEApipeline(''%s'')\n\n', paramFilePath);
 end
 end
