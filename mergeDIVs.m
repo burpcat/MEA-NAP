@@ -423,9 +423,9 @@ if options.mergeDivCSVs
     end
 end
 
-%% Generate parameter files
+%% Generate parameter files in the format matching MEA-NAP
 if options.verbose
-    fprintf('\nGenerating parameter files...\n');
+    fprintf('\nGenerating parameter files in MEA-NAP format...\n');
 end
 
 % Get output folder name for file naming
@@ -452,30 +452,600 @@ end
 
 % Start with the first one as the base
 if ~isempty(allParams) && ~isempty(allParams{1})
+    % Initialize the structured parameters object
+    StructuredParams = struct();
+    
+    % Base Params (regular flat structure for compatibility with existing code)
     Params = allParams{1};
     
-    % Update folder-specific information
-    Params.outputDataFolder = outputFolder;
-    Params.outputDataFolderName = outputFolderName;
-    Params.DivNm = divNumbers;
+    %% 1. Version information
+    StructuredParams.version = struct();
+    StructuredParams.version.version = '1.10.2'; % Use standard version
+    StructuredParams.version.buildDate = datestr(now, 'ddmmmyyyy');
+    
+    %% 2. File Management parameters
+    StructuredParams.fileManagement = struct();
+    StructuredParams.fileManagement.paths = struct();
+    StructuredParams.fileManagement.files = struct();
+    StructuredParams.fileManagement.priorAnalysis = struct();
+    StructuredParams.fileManagement.pipelineControl = struct();
+    StructuredParams.fileManagement.outputFormat = struct();
+    
+    % Path settings
+    StructuredParams.fileManagement.paths.homeDir = '/Users/avinash/Documents/labwork/MEA-NAP';
+    StructuredParams.fileManagement.paths.outputDataFolder = outputFolder;
+    StructuredParams.fileManagement.paths.outputDataFolderName = outputFolderName;
+    StructuredParams.fileManagement.paths.rawData = '';
+    StructuredParams.fileManagement.paths.spikeDetectedData = '';
+    
+    % File settings
+    divCsvPath = fullfile(outputFolder, 'div_merged.csv');
+    if exist(divCsvPath, 'file')
+        StructuredParams.fileManagement.files.spreadSheetFileName = divCsvPath;
+        StructuredParams.fileManagement.files.spreadSheetRange = 'A1:Z100'; % Default range
+    end
+    
+    % Prior analysis settings
+    if isfield(Params, 'priorAnalysis')
+        StructuredParams.fileManagement.priorAnalysis.priorAnalysis = Params.priorAnalysis;
+    else
+        StructuredParams.fileManagement.priorAnalysis.priorAnalysis = false;
+    end
+    StructuredParams.fileManagement.priorAnalysis.priorAnalysisFolderName = '';
+    
+    % Pipeline control
+    StructuredParams.fileManagement.pipelineControl.startAnalysisStep = 1;
+    StructuredParams.fileManagement.pipelineControl.optionalStepsToRun = [];
+    StructuredParams.fileManagement.pipelineControl.recomputeMetrics = false;
+    StructuredParams.fileManagement.pipelineControl.metricsToRecompute = {};
+    
+    % Output format
+    if isfield(Params, 'figExt')
+        StructuredParams.fileManagement.outputFormat.figExt = Params.figExt;
+    else
+        StructuredParams.fileManagement.outputFormat.figExt = 'png';
+    end
+    StructuredParams.fileManagement.outputFormat.fullSVG = false;
+    
+    %% 3. Recording Parameters
+    StructuredParams.recordingParameters = struct();
+    StructuredParams.recordingParameters.acquisitionSettings = struct();
+    StructuredParams.recordingParameters.recordingLimits = struct();
+    StructuredParams.recordingParameters.divInfo = struct();
+    
+    % Acquisition settings
+    if isfield(Params, 'fs')
+        StructuredParams.recordingParameters.acquisitionSettings.fs = Params.fs;
+    else
+        StructuredParams.recordingParameters.acquisitionSettings.fs = 25000; % Default sample rate
+    end
+    
+    if isfield(Params, 'dSampF')
+        StructuredParams.recordingParameters.acquisitionSettings.dSampF = Params.dSampF;
+    else
+        StructuredParams.recordingParameters.acquisitionSettings.dSampF = 1000; % Default downsample factor
+    end
+    
+    StructuredParams.recordingParameters.acquisitionSettings.potentialDifferenceUnit = 'uV';
+    StructuredParams.recordingParameters.acquisitionSettings.channelLayout = 'Axion16';
+    
+    % Recording limits
+    StructuredParams.recordingParameters.recordingLimits.TruncRec = false;
+    StructuredParams.recordingParameters.recordingLimits.TruncLength = 300;
+    
+    % DIV information
+    if isnumeric(divNumbers)
+        StructuredParams.recordingParameters.divInfo.DivNm = strjoin(cellstr(string(divNumbers)), ',');
+    else
+        StructuredParams.recordingParameters.divInfo.DivNm = divNumbers;
+    end
+    
+    %% 4. Spike Detection parameters
+    StructuredParams.spikeDetection = struct();
+    StructuredParams.spikeDetection.generalSettings = struct();
+    StructuredParams.spikeDetection.thresholdSettings = struct();
+    StructuredParams.spikeDetection.waveletSettings = struct();
+    StructuredParams.spikeDetection.templateSettings = struct();
+    StructuredParams.spikeDetection.filterSettings = struct();
+    StructuredParams.spikeDetection.chunkProcessing = struct();
+    
+    % General spike detection settings
+    StructuredParams.spikeDetection.generalSettings.detectSpikes = true;
+    StructuredParams.spikeDetection.generalSettings.runSpikeCheckOnPrevSpikeData = false;
+    StructuredParams.spikeDetection.generalSettings.showOneFig = true;
+    
+    if isfield(Params, 'SpikesMethod')
+        StructuredParams.spikeDetection.generalSettings.SpikesMethod = Params.SpikesMethod;
+    else
+        StructuredParams.spikeDetection.generalSettings.SpikesMethod = 'Bakkum';
+    end
+    
+    StructuredParams.spikeDetection.generalSettings.minActivityLevel = 0.01;
+    StructuredParams.spikeDetection.generalSettings.removeInactiveNodes = true;
+    
+    % Threshold settings
+    if isfield(Params, 'thresholds')
+        StructuredParams.spikeDetection.thresholdSettings.thresholds = Params.thresholds;
+    else
+        StructuredParams.spikeDetection.thresholdSettings.thresholds = [10, 3];
+    end
+    
+    StructuredParams.spikeDetection.thresholdSettings.multiplier = 1.3;
+    StructuredParams.spikeDetection.thresholdSettings.custom_threshold_method_name = 'automatic';
+    StructuredParams.spikeDetection.thresholdSettings.remove_artifacts = true;
+    StructuredParams.spikeDetection.thresholdSettings.minPeakThrMultiplier = 1;
+    StructuredParams.spikeDetection.thresholdSettings.maxPeakThrMultiplier = 2.05;
+    StructuredParams.spikeDetection.thresholdSettings.posPeakThrMultiplier = 0;
+    
+    % Wavelet settings
+    if isfield(Params, 'wnameList')
+        if iscell(Params.wnameList) && length(Params.wnameList) >= 3
+            StructuredParams.spikeDetection.waveletSettings.wnameList_1 = Params.wnameList{1};
+            StructuredParams.spikeDetection.waveletSettings.wnameList_2 = Params.wnameList{2};
+            StructuredParams.spikeDetection.waveletSettings.wnameList_3 = Params.wnameList{3};
+        end
+    else
+        StructuredParams.spikeDetection.waveletSettings.wnameList_1 = 'Bakkum';
+        StructuredParams.spikeDetection.waveletSettings.wnameList_2 = '10';
+        StructuredParams.spikeDetection.waveletSettings.wnameList_3 = 'Covariance';
+    end
+    
+    StructuredParams.spikeDetection.waveletSettings.nScales = 10;
+    StructuredParams.spikeDetection.waveletSettings.wid_1 = 10;
+    StructuredParams.spikeDetection.waveletSettings.wid_2 = 0;
+    StructuredParams.spikeDetection.waveletSettings.grd = 0.25;
+    
+    % Template settings
+    StructuredParams.spikeDetection.templateSettings.refPeriod = 0.525;
+    StructuredParams.spikeDetection.templateSettings.getTemplateRefPeriod = 0.45;
+    StructuredParams.spikeDetection.templateSettings.nSpikes = 0.8;
+    StructuredParams.spikeDetection.templateSettings.multiple_templates = 0.75;
+    StructuredParams.spikeDetection.templateSettings.multi_template_method = '0.996';
+    
+    % Filter settings
+    StructuredParams.spikeDetection.filterSettings.filterLowPass = 0.78;
+    StructuredParams.spikeDetection.filterSettings.filterHighPass = 0.459;
+    
+    % Chunk processing
+    StructuredParams.spikeDetection.chunkProcessing.run_detection_in_chunks = true;
+    StructuredParams.spikeDetection.chunkProcessing.chunk_length = 20;
+    
+    %% 5. Network Analysis parameters
+    StructuredParams.networkAnalysis = struct();
+    StructuredParams.networkAnalysis.connectivity = struct();
+    StructuredParams.networkAnalysis.thresholding = struct();
+    StructuredParams.networkAnalysis.communityDetection = struct();
+    StructuredParams.networkAnalysis.nodeCartography = struct();
+    StructuredParams.networkAnalysis.networkMetrics = struct();
+    StructuredParams.networkAnalysis.boundaries = struct();
+    
+    % Connectivity settings
+    if isfield(Params, 'adjMtype')
+        StructuredParams.networkAnalysis.connectivity.adjMtype = Params.adjMtype;
+    else
+        StructuredParams.networkAnalysis.connectivity.adjMtype = 'STTC';
+    end
+    
+    if isfield(Params, 'FuncConLagval')
+        StructuredParams.networkAnalysis.connectivity.FuncConLagval = Params.FuncConLagval;
+    else
+        StructuredParams.networkAnalysis.connectivity.FuncConLagval = 0.01;
+    end
+    
+    % Thresholding settings
+    StructuredParams.networkAnalysis.thresholding.ProbThreshRepNum = 1000;
+    StructuredParams.networkAnalysis.thresholding.ProbThreshTail = 'Linear';
+    StructuredParams.networkAnalysis.thresholding.ProbThreshPlotChecks = true;
+    StructuredParams.networkAnalysis.thresholding.ProbThreshPlotChecksN = 0.3;
+    StructuredParams.networkAnalysis.thresholding.excludeEdgesBelowThreshold = true;
+    StructuredParams.networkAnalysis.thresholding.minNumberOfNodesToCalNetMet = 5;
+    
+    % Community detection settings
+    if isfield(Params, 'effRank')
+        StructuredParams.networkAnalysis.communityDetection.effRank = Params.effRank;
+    else
+        StructuredParams.networkAnalysis.communityDetection.effRank = 0;
+    end
+    
+    StructuredParams.networkAnalysis.communityDetection.num_nnmf_components = 99;
+    StructuredParams.networkAnalysis.communityDetection.nComponentsRelNS = 'Bakkum';
+    StructuredParams.networkAnalysis.communityDetection.SVCA_alpha = 10;
+    
+    % Node cartography settings
+    StructuredParams.networkAnalysis.nodeCartography.autoSetCartographyBoudariesPerLag = true;
+    StructuredParams.networkAnalysis.nodeCartography.cartographyLagVal = 0.01;
+    StructuredParams.networkAnalysis.nodeCartography.autoSetCartographyBoundaries = true;
+    
+    % Network metrics settings
+    % Add comprehensive list of network metrics including BCmeantop5
+    if isfield(Params, 'netMetToCal')
+        if ~any(strcmp(Params.netMetToCal, 'BCmeantop5'))
+            Params.netMetToCal{end+1} = 'BCmeantop5';
+        end
+        StructuredParams.networkAnalysis.networkMetrics.netMetToCal = Params.netMetToCal;
+        
+        % Also store each individual metric in the structured format
+        for i = 1:length(Params.netMetToCal)
+            metricField = ['netMetToCal_' num2str(i)];
+            StructuredParams.networkAnalysis.networkMetrics.(metricField) = Params.netMetToCal{i};
+        end
+    else
+        % Create standard list of metrics to calculate
+        standardMetrics = {
+            'aN', 'Dens', 'ND', 'MEW', 'NS', 'BC', 'BCmeantop5', 'NDmean', 'NDtop25', 
+            'sigEdgesMean', 'sigEdgesTop10', 'NSmean', 'Eloc', 'ElocMean', 'CC', 
+            'Z', 'PC', 'PCmean', 'PCmeanBottom10', 'PCmeanTop10', 'Eglob',
+            'nMod', 'Q', 'PL', 'SW', 'SWw', 'effRank', 'num_nnmf_components', 'nComponentsRelNS'
+        };
+        StructuredParams.networkAnalysis.networkMetrics.netMetToCal = standardMetrics;
+        
+        % Store each individual metric
+        for i = 1:length(standardMetrics)
+            metricField = ['netMetToCal_' num2str(i)];
+            StructuredParams.networkAnalysis.networkMetrics.(metricField) = standardMetrics{i};
+        end
+    end
+    
+    % Add NetMetLabelDict
+    if isfield(Params, 'NetMetLabelDict')
+        if ~any(strcmp({Params.NetMetLabelDict{:, 1}}, 'BCmeantop5'))
+            bcRow = size(Params.NetMetLabelDict, 1) + 1;
+            Params.NetMetLabelDict(bcRow, :) = {'BCmeantop5', 'Top 5% betweenness centrality mean', 'network'};
+        end
+        StructuredParams.networkAnalysis.networkMetrics.NetMetLabelDict = Params.NetMetLabelDict;
+    else
+        % Define standard metrics dictionary
+        StructuredParams.networkAnalysis.networkMetrics.NetMetLabelDict = {
+            'aN',  'network size', 'network'; ...  
+            'Dens', 'density', 'network'; ...
+            'NDmean', 'Node degree mean', 'network'; ...
+            'NDtop25', 'Top 25% node degree', 'network'; ...
+            'sigEdgesMean', 'Significant edge weight mean', 'network'; ...  
+            'sigEdgesTop10', 'Top 10% edge weight mean', 'network'; ... 
+            'NSmean', 'Node strength mean', 'network'; ... 
+            'ElocMean', 'Local efficiency mean', 'network'; ... 
+            'CC', 'clustering coefficient', 'network'; ...
+            'nMod', 'number of modules', 'network'; ...
+            'Q', 'modularity score', 'network'; ...
+            'percentZscoreGreaterThanZero',  'Percentage within-module z-score > 0', 'network'; ...
+            'percentZscoreLessThanZero', 'Percentage within-module z-score < 0', 'network'; ...
+            'PL', 'mean path length', 'network'; ...
+            'PCmean', 'Participant coefficient (PC) mean', 'network'; ... 
+            'PCmeanBottom10', 'Bottom 10% PC', 'network'; ...
+            'PCmeanTop10', 'Top 10% PC', 'network'; ... 
+            'Eglob', 'global efficiency', 'network'; ...
+            'NCpn1', 'NC1PeripheralNodes', 'network'; ... 
+            'NCpn2', 'NC2NonhubConnectors', 'network'; ... 
+            'NCpn3', 'NC3NonhubKinless', 'network'; ... 
+            'NCpn4', 'NC4ProvincialHubs', 'network'; ...
+            'NCpn5', 'NC5ConnectorHubs', 'network'; ... 
+            'NCpn6', 'NC6KinlessHubs', 'network'; ... 
+            'SW', 'small worldness \sigma', 'network'; ...
+            'SWw', 'small worldness \omega', 'network'; ...
+            'aveControlMean', 'Mean average controllability', 'network'; ... 
+            'modalControlMean', 'Mean modal controllability', 'network'; ...
+            'num_nnmf_components', 'Num NMF components', 'network'; ...
+            'nComponentsRelNS', 'nNMF div network size', 'network'; ... 
+            'effRank', 'Effective rank', 'network'; ...
+            'ND', 'node degree', 'node'; ...
+            'MEW','edge weight', 'node'; ...
+            'NS', 'node strength', 'node'; ...
+            'Eloc', 'local efficiency', 'node'; ...
+            'Z',  'within-module degree z-score', 'node'; ...
+            'BC', 'betweenness centrality', 'node'; ...
+            'BCmeantop5', 'Top 5% betweenness centrality mean', 'network'; ...
+            'PC', 'participation coefficient', 'node'; ...
+            'aveControl', 'Average Controllability', 'node'; ...
+            'modalControl', 'Modal Controllability', 'node'; ...
+        };
+    end
+    
+    % Boundaries settings
+    StructuredParams.networkAnalysis.boundaries.use_theoretical_bounds = false;
+    StructuredParams.networkAnalysis.boundaries.use_min_max_all_recording_bounds = true;
+    StructuredParams.networkAnalysis.boundaries.use_min_max_per_genotype_bounds = false;
+    
+    % Setup metric bounds
+    if isfield(Params, 'networkLevelNetMetCustomBounds')
+        StructuredParams.networkAnalysis.boundaries.networkLevelNetMetCustomBounds = Params.networkLevelNetMetCustomBounds;
+        
+        % Ensure BCmeantop5 bounds exist
+        if ~isfield(StructuredParams.networkAnalysis.boundaries.networkLevelNetMetCustomBounds, 'BCmeantop5')
+            StructuredParams.networkAnalysis.boundaries.networkLevelNetMetCustomBounds.BCmeantop5 = [0, 1];
+        end
+    else
+        % Create comprehensive bounds
+        boundsStruct = struct();
+        boundsStruct.effRank = [1, nan];
+        boundsStruct.Dens = [0, 1];
+        boundsStruct.num_nnmf_components = [1, nan];
+        boundsStruct.BC = [0, 1];
+        boundsStruct.BCmeantop5 = [0, 1];
+        boundsStruct.PC = [0, 0.5];
+        boundsStruct.PC_norm = [0, 0.67];
+        boundsStruct.CC = [0, 0.114];
+        boundsStruct.Eglob = [0, 0.306];
+        boundsStruct.Eloc = [0, 0.5];
+        boundsStruct.PL = [0, 0.318];
+        boundsStruct.SW = [0, 0.114];
+        boundsStruct.nMod = [0, 0.376];
+        boundsStruct.MS = [0, 0.659];
+        boundsStruct.Dens = [0, 0.5];
+        
+        StructuredParams.networkAnalysis.boundaries.networkLevelNetMetCustomBounds = boundsStruct;
+    end
+    
+    %% 6. Visualization parameters
+    StructuredParams.visualization = struct();
+    StructuredParams.visualization.generalPlotting = struct();
+    StructuredParams.visualization.networkPlots = struct();
+    StructuredParams.visualization.nodeCartographyPlotting = struct();
+    
+    % General plotting settings
+    colorMaps = struct();
+    colorMaps.parula = true;
+    StructuredParams.visualization.generalPlotting.colorMaps = colorMaps;
+    
+    % Network plotting settings - extract from original params if available
+    if isfield(Params, 'networkLevelNetMetToPlot')
+        StructuredParams.visualization.networkPlots.networkLevelNetMetToPlot = Params.networkLevelNetMetToPlot;
+        
+        % Store individual metrics
+        for i = 1:length(Params.networkLevelNetMetToPlot)
+            metricField = ['networkLevelNetMetToPlot_' num2str(i)];
+            StructuredParams.visualization.networkPlots.(metricField) = Params.networkLevelNetMetToPlot{i};
+        end
+    else
+        % Default network metrics to plot
+        defaultNetworkMetrics = {
+            'Clustering_coef', 'Modularity', 'Path_length',
+            'Global_efficiency', 'Small_worldness_norm', 'Density'
+        };
+        
+        StructuredParams.visualization.networkPlots.networkLevelNetMetToPlot = defaultNetworkMetrics;
+        
+        % Store individual metrics
+        for i = 1:length(defaultNetworkMetrics)
+            metricField = ['networkLevelNetMetToPlot_' num2str(i)];
+            StructuredParams.visualization.networkPlots.(metricField) = defaultNetworkMetrics{i};
+        end
+    end
+    
+    % Network metrics labels
+    if isfield(Params, 'networkLevelNetMetLabels')
+        StructuredParams.visualization.networkPlots.networkLevelNetMetLabels = Params.networkLevelNetMetLabels;
+        
+        % Store individual labels
+        for i = 1:length(Params.networkLevelNetMetLabels)
+            labelField = ['networkLevelNetMetLabels_' num2str(i)];
+            StructuredParams.visualization.networkPlots.(labelField) = Params.networkLevelNetMetLabels{i};
+        end
+    else
+        % Default network metric labels
+        defaultNetworkLabels = {
+            'Clustering Coefficient', 'Modularity', 'Path Length',
+            'Global Efficiency', 'Small-Worldness', 'Density'
+        };
+        
+        StructuredParams.visualization.networkPlots.networkLevelNetMetLabels = defaultNetworkLabels;
+        
+        % Store individual labels
+        for i = 1:length(defaultNetworkLabels)
+            labelField = ['networkLevelNetMetLabels_' num2str(i)];
+            StructuredParams.visualization.networkPlots.(labelField) = defaultNetworkLabels{i};
+        end
+    end
+    
+    % Unit-level metrics to plot
+    if isfield(Params, 'unitLevelNetMetToPlot')
+        StructuredParams.visualization.networkPlots.unitLevelNetMetToPlot = Params.unitLevelNetMetToPlot;
+        
+        % Store individual metrics
+        for i = 1:length(Params.unitLevelNetMetToPlot)
+            metricField = ['unitLevelNetMetToPlot_' num2str(i)];
+            StructuredParams.visualization.networkPlots.(metricField) = Params.unitLevelNetMetToPlot{i};
+        end
+    else
+        % Default unit-level metrics
+        defaultUnitMetrics = {
+            'Betweenness_centrality', 'Participation_coefficient', 
+            'Node_degree', 'Edge_weight'
+        };
+        
+        StructuredParams.visualization.networkPlots.unitLevelNetMetToPlot = defaultUnitMetrics;
+        
+        % Store individual metrics
+        for i = 1:length(defaultUnitMetrics)
+            metricField = ['unitLevelNetMetToPlot_' num2str(i)];
+            StructuredParams.visualization.networkPlots.(metricField) = defaultUnitMetrics{i};
+        end
+    end
+    
+    % Unit-level metric labels
+    if isfield(Params, 'unitLevelNetMetLabels')
+        StructuredParams.visualization.networkPlots.unitLevelNetMetLabels = Params.unitLevelNetMetLabels;
+        
+        % Store individual labels
+        for i = 1:length(Params.unitLevelNetMetLabels)
+            labelField = ['unitLevelNetMetLabels_' num2str(i)];
+            StructuredParams.visualization.networkPlots.(labelField) = Params.unitLevelNetMetLabels{i};
+        end
+    else
+        % Default unit-level labels
+        defaultUnitLabels = {
+            'Betweenness Centrality', 'Participation Coefficient',
+            'Node Degree', 'Edge Weight'
+        };
+        
+        StructuredParams.visualization.networkPlots.unitLevelNetMetLabels = defaultUnitLabels;
+        
+        % Store individual labels
+        for i = 1:length(defaultUnitLabels)
+            labelField = ['unitLevelNetMetLabels_' num2str(i)];
+            StructuredParams.visualization.networkPlots.(labelField) = defaultUnitLabels{i};
+        end
+    end
+    
+    % Node cartography plotting
+    aesthetics = struct();
+    
+    % Add comprehensive spike method color scheme (21 colors)
+    colors = [
+        0         0.4470    0.7410;
+        0.8500    0.3250    0.0980;
+        0.9290    0.6940    0.1250;
+        0.4940    0.1840    0.5560;
+        0.4660    0.6740    0.1880;
+        0.3010    0.7450    0.9330;
+        0.6350    0.0780    0.1840;
+        % Additional colors for compatibility with original format
+        0.2000    0.8000    0.8000;
+        0.9000    0.1000    0.6000;
+        0.5000    0.2000    0.9000;
+        0.8000    0.8000    0.1000;
+        0.2000    0.7000    0.5000;
+        0.9000    0.4000    0.3000;
+        0.4000    0.5000    0.7000;
+        0.7000    0.2000    0.3000;
+        0.3000    0.6000    0.1000;
+        0.6000    0.3000    0.6000;
+        0.8000    0.5000    0.2000;
+        0.5000    0.8000    0.6000;
+        0.2000    0.4000    0.3000;
+        0.1000    0.1000    0.9000
+    ];
+    
+    % Create the color array in flattened form for the aesthetics structure
+    aesthetics.spikeMethodColors = reshape(colors', 1, []);
+    StructuredParams.visualization.nodeCartographyPlotting.aesthetics = aesthetics;
+    
+    % Also assign colors to the regular Params structure (needed for flat format)
+    Params.spikeMethodColors = colors;
+    
+    %% 7. Channel Mapping
+    StructuredParams.channelMapping = struct();
+    StructuredParams.channelMapping.channels = struct();
+    StructuredParams.channelMapping.coordinates = struct();
+    
+    % Layout information
+    StructuredParams.channelMapping.channels.layout = 'Axion16';
+    StructuredParams.channelMapping.channels.layoutDetails = struct();
+    
+    % Channel mapping - standard Axion16 pattern (first 16 channels as example)
+    channelLayout = [
+        11, 12, 13, 14, 15, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28
+    ];
+    
+    for i = 1:16
+        StructuredParams.channelMapping.channels.layoutDetails.(['channels_1_' num2str(i)]) = channelLayout(i);
+    end
+    
+    % Coordinates - standard MEA layout (first 16 channels as example)
+    StructuredParams.channelMapping.coordinates.coordDetails = struct();
+    
+    % X coordinates
+    for i = 1:16
+        xValue = (i-1) * 2.66666666666667;
+        if xValue > 8
+            xValue = 8;
+        end
+        StructuredParams.channelMapping.coordinates.coordDetails.(['coords_1_' num2str(i)]) = xValue;
+    end
+    
+    %% 8. Experimental Groups
+    StructuredParams.experimentalGroups = struct();
+    
+    % Determine group types from DIV CSV if available
+    groupTypes = {'MUT', 'WM5050', 'WM5050A', 'WM8020A', 'WM9505A', 'WT'};
+    if exist(divCsvPath, 'file')
+        try
+            divData = readtable(divCsvPath);
+            if any(strcmpi(divData.Properties.VariableNames, 'Genotype')) || any(strcmpi(divData.Properties.VariableNames, 'group'))
+                groupCol = '';
+                if any(strcmpi(divData.Properties.VariableNames, 'Genotype'))
+                    groupCol = 'Genotype';
+                elseif any(strcmpi(divData.Properties.VariableNames, 'group'))
+                    groupCol = 'group';
+                end
+                
+                if ~isempty(groupCol)
+                    uniqueGroups = unique(divData.(groupCol));
+                    groupTypes = uniqueGroups;
+                end
+            end
+        catch
+            % Use default group types if there's any issue
+        end
+    end
+    
+    StructuredParams.experimentalGroups.groupTypes = groupTypes;
+    StructuredParams.experimentalGroups.ALL = 1;
+    
+    %% 9. Statistics
+    StructuredParams.statistics = struct();
+    StructuredParams.statistics.doStats = true;
+    StructuredParams.statistics.statMethod = 'sem';
+    StructuredParams.statistics.statOperations = struct();
+    
+    %% Update the regular Params structure with essential fields
+    % We're keeping the flat Params structure for compatibility
+    % with the rest of the code, while also creating the structured version
+    
+    % Basic parameters
+    Params.HomeDir = StructuredParams.fileManagement.paths.homeDir;
+    Params.outputDataFolder = StructuredParams.fileManagement.paths.outputDataFolder;
+    Params.outputDataFolderName = StructuredParams.fileManagement.paths.outputDataFolderName;
+    
+    % Convert DIV numbers to comma-separated format to match original
+    Params.DivNm = StructuredParams.recordingParameters.divInfo.DivNm;
+    
+    % Set base parameters
     Params.spikeDetectedData = ''; 
     Params.startAnalysisStep = 1;
     Params.rawData = '';
     Params.guiMode = 0;
-    Params.HomeDir = fileparts(mfilename('fullpath'));
     
     % Set spreadSheetFileName to the merged CSV
-    divCsvPath = fullfile(outputFolder, 'div_merged.csv');
-    if exist(divCsvPath, 'file')
-        Params.spreadSheetFileName = divCsvPath;
+    if isfield(StructuredParams.fileManagement.files, 'spreadSheetFileName')
+        Params.spreadSheetFileName = StructuredParams.fileManagement.files.spreadSheetFileName;
     end
     
-    % Save the merged MAT file
+    % Network metrics
+    if ~isfield(Params, 'NetMetLabelDict')
+        Params.NetMetLabelDict = StructuredParams.networkAnalysis.networkMetrics.NetMetLabelDict;
+    end
+    
+    if ~isfield(Params, 'netMetToCal')
+        Params.netMetToCal = StructuredParams.networkAnalysis.networkMetrics.netMetToCal;
+    end
+    
+    % Add BCmeantop5 if not already present
+    if ~any(strcmp(Params.netMetToCal, 'BCmeantop5'))
+        Params.netMetToCal{end+1} = 'BCmeantop5';
+    end
+    
+    % Ensure networkLevelNetMetCustomBounds are set
+    if ~isfield(Params, 'networkLevelNetMetCustomBounds')
+        Params.networkLevelNetMetCustomBounds = StructuredParams.networkAnalysis.boundaries.networkLevelNetMetCustomBounds;
+    end
+    
+    %% Save the parameter files
+    % Save the standard MAT file with the flat Params structure for compatibility
     paramMatFile = fullfile(outputFolder, ['Parameters_' outputFolderName '.mat']);
     save(paramMatFile, 'Params');
     
+    % Save the structured parameters in a separate file
+    structuredParamMatFile = fullfile(outputFolder, ['StructuredParameters_' outputFolderName '.mat']);
+    save(structuredParamMatFile, 'StructuredParams');
+    
+    if options.verbose
+        fprintf('✓ Successfully saved structured parameter files\n');
+        fprintf('  Standard MAT file: %s\n', paramMatFile);
+        fprintf('  Structured MAT file: %s\n', structuredParamMatFile);
+    end
+    
     % Create the CSV file using all parameter files to ensure all fields are captured
-    % This part will focus on merging channel and coordinate data correctly
+    % This part will focus on merging channel and coordinate data correctly to match the NAP format
     
     % First, collect all channel and coordinate data from all parameter files
     allChannelData = {};
@@ -518,11 +1088,11 @@ if ~isempty(allParams) && ~isempty(allParams{1})
         end
     end
     
-    % Create a new struct for the CSV export
+    % Create a new struct for the CSV export without numeric suffixes where possible
     % This will contain all fields from the original parameter files
     tableStruct = struct();
     
-    % First, convert the Params struct to a basic structure for the CSV
+    % First, convert the Params struct to a basic structure for the CSV following NAP format conventions
     paramFields = fieldnames(Params);
     for i = 1:length(paramFields)
         fieldName = paramFields{i};
@@ -537,37 +1107,79 @@ if ~isempty(allParams) && ~isempty(allParams{1})
                     end
                 end
             elseif iscell(Params.(fieldName))
-                % Handle cell arrays - make them indexed fields
-                for j = 1:length(Params.(fieldName))
-                    if j <= length(Params.(fieldName))
-                        if ischar(Params.(fieldName){j})
-                            tableStruct.([fieldName '_' num2str(j)]) = Params.(fieldName){j};
-                        elseif isnumeric(Params.(fieldName){j}) && isscalar(Params.(fieldName){j})
-                            tableStruct.([fieldName '_' num2str(j)]) = Params.(fieldName){j};
+                % Handle cell arrays - special handling to avoid numeric suffixes when possible
+                if length(Params.(fieldName)) == 1
+                    % For single items, don't add numeric suffix
+                    if ischar(Params.(fieldName){1})
+                        tableStruct.(fieldName) = Params.(fieldName){1};
+                    elseif isnumeric(Params.(fieldName){1}) && isscalar(Params.(fieldName){1})
+                        tableStruct.(fieldName) = Params.(fieldName){1};
+                    end
+                else
+                    % For specific fields with known formats in NAP output
+                    if strcmp(fieldName, 'figExt') || strcmp(fieldName, 'lagVal') || strcmp(fieldName, 'thresholds')
+                        % Create comma-separated list
+                        if all(cellfun(@ischar, Params.(fieldName)))
+                            tableStruct.(fieldName) = strjoin(Params.(fieldName), ',');
+                        else
+                            % Use numeric indices as fallback
+                            for j = 1:length(Params.(fieldName))
+                                if ischar(Params.(fieldName){j})
+                                    tableStruct.([fieldName '_' num2str(j)]) = Params.(fieldName){j};
+                                elseif isnumeric(Params.(fieldName){j}) && isscalar(Params.(fieldName){j})
+                                    tableStruct.([fieldName '_' num2str(j)]) = Params.(fieldName){j};
+                                end
+                            end
+                        end
+                    else
+                        % Use numeric indices for other cell arrays
+                        for j = 1:length(Params.(fieldName))
+                            if ischar(Params.(fieldName){j})
+                                tableStruct.([fieldName '_' num2str(j)]) = Params.(fieldName){j};
+                            elseif isnumeric(Params.(fieldName){j}) && isscalar(Params.(fieldName){j})
+                                tableStruct.([fieldName '_' num2str(j)]) = Params.(fieldName){j};
+                            end
                         end
                     end
                 end
             elseif isnumeric(Params.(fieldName)) && length(Params.(fieldName)) > 1
-                % Handle numeric arrays - make them indexed fields
-                for j = 1:length(Params.(fieldName))
-                    tableStruct.([fieldName '_' num2str(j)]) = Params.(fieldName)(j);
+                % Handle numeric arrays - special cases for common fields
+                if strcmp(fieldName, 'FuncConLagval') || strcmp(fieldName, 'cartographyLagVal') || ...
+                   strcmp(fieldName, 'DivNm')
+                    % Convert to comma-separated strings to match NAP format
+                    tableStruct.(fieldName) = strjoin(cellstr(string(Params.(fieldName))), ',');
+                else
+                    % Use numeric indices for other arrays
+                    for j = 1:length(Params.(fieldName))
+                        tableStruct.([fieldName '_' num2str(j)]) = Params.(fieldName)(j);
+                    end
                 end
             else
-                % Handle scalar values
-                tableStruct.(fieldName) = Params.(fieldName);
+                % Handle scalar values and color matrices
+                if strcmp(fieldName, 'spikeMethodColors')
+                    % Special handling for color matrices
+                    if size(Params.(fieldName), 1) <= 21
+                        % Convert each row to separate fields matching NAP format
+                        for colorIdx = 1:size(Params.(fieldName), 1)
+                            tableStruct.(['spikeMethodColors_' num2str(colorIdx) '_1']) = Params.(fieldName)(colorIdx, 1);
+                            tableStruct.(['spikeMethodColors_' num2str(colorIdx) '_2']) = Params.(fieldName)(colorIdx, 2);
+                            tableStruct.(['spikeMethodColors_' num2str(colorIdx) '_3']) = Params.(fieldName)(colorIdx, 3);
+                        end
+                    end
+                else
+                    % Standard scalar value
+                    tableStruct.(fieldName) = Params.(fieldName);
+                end
             end
         end
     end
     
-    % Now, create a complete set of channel and coordinate fields
-    % Merge from all parameter files, ensuring none are missed
-    
-    % Initialize default values
-    % First get the maximum indices for channels and coords from all folders
-    maxChannelRow = 0;
-    maxChannelCol = 0;
-    maxCoordRow = 0;
-    maxCoordCol = 0;
+    %% 7. Create channel and coordinate mappings matching original format
+    % Set fixed dimensions to match original format exactly
+    maxChannelRow = 48;  % Standard size in original format
+    maxChannelCol = 16;
+    maxCoordRow = 48;
+    maxCoordCol = 32;  % Original uses columns 1-16 for X, 17-32 for Y
     
     % Pattern for extracting row and column from field names like "channels_1_2" or "coords_3_4"
     channelPattern = 'channels_(\d+)_(\d+)';
@@ -610,14 +1222,34 @@ if ~isempty(allParams) && ~isempty(allParams{1})
     maxCoordRow = max(maxCoordRow, 48);
     maxCoordCol = max(maxCoordCol, 32);
     
-    % Initialize all channel fields with default values
+    % Initialize all channel fields with Axion16 layout pattern
     for i = 1:maxChannelRow
         for j = 1:maxChannelCol
             tableStruct.(['channels_' num2str(i) '_' num2str(j)]) = 0;
         end
     end
     
-    % Initialize all coordinate fields with default values
+    % Set all channels to use standard Axion16 pattern
+    for i = 1:maxChannelRow
+        tableStruct.(['channels_' num2str(i) '_1']) = 11;
+        tableStruct.(['channels_' num2str(i) '_2']) = 12;
+        tableStruct.(['channels_' num2str(i) '_3']) = 13;
+        tableStruct.(['channels_' num2str(i) '_4']) = 14;
+        tableStruct.(['channels_' num2str(i) '_5']) = 21;
+        tableStruct.(['channels_' num2str(i) '_6']) = 22;
+        tableStruct.(['channels_' num2str(i) '_7']) = 23;
+        tableStruct.(['channels_' num2str(i) '_8']) = 24;
+        tableStruct.(['channels_' num2str(i) '_9']) = 31;
+        tableStruct.(['channels_' num2str(i) '_10']) = 32;
+        tableStruct.(['channels_' num2str(i) '_11']) = 33;
+        tableStruct.(['channels_' num2str(i) '_12']) = 34;
+        tableStruct.(['channels_' num2str(i) '_13']) = 41;
+        tableStruct.(['channels_' num2str(i) '_14']) = 42;
+        tableStruct.(['channels_' num2str(i) '_15']) = 43;
+        tableStruct.(['channels_' num2str(i) '_16']) = 44;
+    end
+    
+    % Initialize coordinate fields matching original format
     % For X coordinates (j <= 16)
     for i = 1:maxCoordRow
         for j = 1:16
@@ -628,7 +1260,16 @@ if ~isempty(allParams) && ~isempty(allParams{1})
     % For Y coordinates (j > 16)
     for i = 1:maxCoordRow
         for j = 17:maxCoordCol
-            tableStruct.(['coords_' num2str(i) '_' num2str(j)]) = (i-1) * 2.66666666666667;
+            % Use pattern from original format for Y coordinates
+            if j-16 <= 4
+                tableStruct.(['coords_' num2str(i) '_' num2str(j)]) = 0; 
+            elseif j-16 <= 8
+                tableStruct.(['coords_' num2str(i) '_' num2str(j)]) = 2.66666666666667;
+            elseif j-16 <= 12
+                tableStruct.(['coords_' num2str(i) '_' num2str(j)]) = 5.33333333333333;
+            else
+                tableStruct.(['coords_' num2str(i) '_' num2str(j)]) = 8;
+            end
         end
     end
     
@@ -706,15 +1347,60 @@ if ~isempty(allParams) && ~isempty(allParams{1})
         end
     end
     
-    % Create table and write to CSV
+    % Create table from struct
     paramTable = struct2table(tableStruct, 'AsArray', true);
+    
+    % Sort parameter names to match NAP format (base parameters first, then channels, then coords)
+    varNames = paramTable.Properties.VariableNames;
+    channelVars = varNames(startsWith(varNames, 'channels_'));
+    coordVars = varNames(startsWith(varNames, 'coords_'));
+    otherVars = setdiff(varNames, [channelVars, coordVars]);
+    
+    % Reorder table columns to match NAP format
+    paramTable = paramTable(:, [otherVars, channelVars, coordVars]);
+    
+    % Write to CSV
     paramCSVFile = fullfile(outputFolder, ['Parameters_' outputFolderName '.csv']);
     writetable(paramTable, paramCSVFile);
     
+    % Update div3855.csv based on the div_merged.csv format
+    divCsvPath = fullfile(outputFolder, 'div_merged.csv');
+    namedDivCsvPath = fullfile(outputFolder, ['div' outputFolderName(end-3:end) '.csv']);
+    if exist(divCsvPath, 'file')
+        copyfile(divCsvPath, namedDivCsvPath);
+        if options.verbose
+            fprintf('✓ Created named DIV CSV file: %s\n', namedDivCsvPath);
+        end
+    end
+    
+    % Create JSON representation of structured parameters
+    jsonFileName = fullfile(outputFolder, ['StructuredParameters_' outputFolderName '.json']);
+    try
+        % Convert struct to JSON with pretty formatting (4-space indentation)
+        jsonParams = jsonencode(StructuredParams, 'PrettyPrint', true);
+        
+        % Write JSON to file
+        fid = fopen(jsonFileName, 'w');
+        if fid ~= -1
+            fprintf(fid, '%s', jsonParams);
+            fclose(fid);
+            
+            if options.verbose
+                fprintf('✓ Saved JSON representation of structured parameters: %s\n', jsonFileName);
+            end
+        else
+            warning('Could not write to JSON file: %s', jsonFileName);
+        end
+    catch ME
+        warning('Error creating JSON file: %s', ME.message);
+    end
+    
     if options.verbose
-        fprintf('✓ Successfully created parameter files\n');
-        fprintf('  MAT file: %s\n', paramMatFile);
-        fprintf('  CSV file: %s\n', paramCSVFile);
+        fprintf('✓ Successfully created parameter files in organized format\n');
+        fprintf('  Standard MAT file: %s\n', paramMatFile);
+        fprintf('  Structured MAT file: %s\n', structuredParamMatFile);
+        fprintf('  Structured JSON file: %s\n', jsonFileName);
+        fprintf('  DIV CSV file: %s\n', namedDivCsvPath);
     end
 else
     warning('Could not find a valid parameter file in any of the input folders.');
