@@ -391,7 +391,111 @@ function generateParameterFiles(divFolders, outputFolder)
         outputMatFile = fullfile(outputFolder, ['Parameters_' outputFolderName '.mat']);
         fprintf('Will write the parameter MAT file to: %s\n', outputMatFile);
         
-        % TODO: Implement the MAT file generation logic
+        % Generate merged Parameter MAT file
+        fprintf('Generating merged Parameter MAT file...\n');
+        if ~isempty(allParameterMatData)
+          % Output file path
+          outputMatFile = fullfile(outputFolder, ['Parameters_' outputFolderName '.mat']);
+          fprintf('Will write the parameter MAT file to: %s\n', outputMatFile);
+        
+          % Start with the first parameter file as base
+          Params = allParameterMatData{1}.Params;
+        
+          % Update critical merged folder information
+          Params.outputDataFolderName = outputFolderName;
+          Params.spreadSheetFileName = fullfile(outputFolder, 'div_merged.csv');
+        
+          % Merge array fields that should be combined
+          % For channels and coords, combine all recording data
+          if isfield(Params, 'channels') && isfield(Params, 'coords')
+              allChannels = {};
+              allCoords = {};
+        
+              % Collect all channel data from all parameter files
+              for i = 1:length(allParameterMatData)
+                  currParams = allParameterMatData{i}.Params;
+                  if isfield(currParams, 'channels') && isfield(currParams, 'coords')
+                      if iscell(currParams.channels)
+                          allChannels = [allChannels currParams.channels];
+                          allCoords = [allCoords currParams.coords];
+                      end
+                  end
+              end
+        
+              % Update with combined arrays
+              Params.channels = allChannels;
+              Params.coords = allCoords;
+          end
+        
+          % Merge other array fields like channelLayoutPerRecording and electrodesToGroundPerRecording
+          if isfield(Params, 'channelLayoutPerRecording')
+              allLayouts = {};
+              for i = 1:length(allParameterMatData)
+                  currParams = allParameterMatData{i}.Params;
+                  if isfield(currParams, 'channelLayoutPerRecording')
+                      if iscell(currParams.channelLayoutPerRecording)
+                          allLayouts = [allLayouts; currParams.channelLayoutPerRecording];
+                      end
+                  end
+              end
+              Params.channelLayoutPerRecording = allLayouts;
+          end
+        
+          if isfield(Params, 'electrodesToGroundPerRecording')
+              allGroundElectrodes = {};
+              for i = 1:length(allParameterMatData)
+                  currParams = allParameterMatData{i}.Params;
+                  if isfield(currParams, 'electrodesToGroundPerRecording')
+                      if iscell(currParams.electrodesToGroundPerRecording)
+                          allGroundElectrodes = [allGroundElectrodes; currParams.electrodesToGroundPerRecording];
+                      end
+                  end
+              end
+              Params.electrodesToGroundPerRecording = allGroundElectrodes;
+          end
+        
+          % Merge DIV information
+          if isfield(Params, 'DivNm')
+              allDivs = [];
+              for i = 1:length(allParameterMatData)
+                  currParams = allParameterMatData{i}.Params;
+                  if isfield(currParams, 'DivNm')
+                      if iscell(currParams.DivNm)
+                          for j = 1:length(currParams.DivNm)
+                              if isnumeric(currParams.DivNm{j})
+                                  allDivs = [allDivs; currParams.DivNm{j}];
+                              end
+                          end
+                      elseif isnumeric(currParams.DivNm)
+                          allDivs = [allDivs; currParams.DivNm];
+                      end
+                  end
+              end
+              % Set unique DIVs (sorted)
+              Params.DivNm = unique(allDivs);
+          end
+        
+          % Merge group information if needed
+          if isfield(Params, 'GrpNm')
+              allGroups = {};
+              for i = 1:length(allParameterMatData)
+                  currParams = allParameterMatData{i}.Params;
+                  if isfield(currParams, 'GrpNm')
+                      if iscell(currParams.GrpNm)
+                          allGroups = [allGroups; currParams.GrpNm];
+                      end
+                  end
+              end
+              % Remove duplicates and keep unique groups
+              Params.GrpNm = unique(allGroups);
+          end
+        
+          % Save the merged Parameters to the output file
+          save(outputMatFile, 'Params');
+          fprintf('Successfully wrote merged Parameter MAT file\n');
+        else
+          warning('No Parameter MAT data found in input folders');
+        end
         % This section is intentionally left empty as requested
         fprintf('MAT file generation logic not yet implemented\n');
     else
