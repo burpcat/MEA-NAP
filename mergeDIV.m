@@ -421,6 +421,7 @@ function mergeParameterCSV(parameterCsvFiles, outputFolder, divMergedCsvPath)
     % Read all parameter CSV files
     allData = cell(length(parameterCsvFiles), 1);
     for i = 1:length(parameterCsvFiles)
+        % Read table with default handling of empty values
         allData{i} = readtable(parameterCsvFiles{i}, 'TextType', 'string');
     end
 
@@ -432,9 +433,10 @@ function mergeParameterCSV(parameterCsvFiles, outputFolder, divMergedCsvPath)
         mergedData.outputDataFolderName(1) = string(outputFolderName);
     end
 
-    if ismember('rawData', mergedData.Properties.VariableNames)
-        mergedData.rawData(1) = "default_value";
-    end
+    % Don't modify rawData - keep original value from first CSV
+    % if ismember('rawData', mergedData.Properties.VariableNames)
+    %     mergedData.rawData(1) = "default_value";
+    % end
 
     if ismember('spreadSheetFileName', mergedData.Properties.VariableNames)
         mergedData.spreadSheetFileName(1) = string(divMergedCsvPath);
@@ -454,6 +456,11 @@ function mergeParameterCSV(parameterCsvFiles, outputFolder, divMergedCsvPath)
             % Skip channel and coord columns
             if ~isempty(regexp(varName, channelColPattern, 'once')) || ...
                ~isempty(regexp(varName, coordColPattern, 'once'))
+                continue;
+            end
+            
+            % Skip automatically generated Var columns
+            if ~isempty(regexp(varName, '^Var\d+$', 'once'))
                 continue;
             end
 
@@ -571,13 +578,13 @@ function mergeParameterCSV(parameterCsvFiles, outputFolder, divMergedCsvPath)
 
         % Special handling for DivNm columns
         if strcmp(colName, 'DivNm')
-            % First file's DivNm becomes DivNm1
-            result.DivNm1 = allData{1}.DivNm(1);
+            % First file's DivNm becomes DivNm_1 (with underscore)
+            result.DivNm_1 = allData{1}.DivNm(1);
 
             % Add DivNm from other files
             for j = 2:length(allData)
                 if ismember('DivNm', allData{j}.Properties.VariableNames)
-                    newColName = sprintf('DivNm%d', j);
+                    newColName = sprintf('DivNm_%d', j);
                     result.(newColName) = allData{j}.DivNm(1);
                 end
             end
@@ -597,16 +604,172 @@ function mergeParameterCSV(parameterCsvFiles, outputFolder, divMergedCsvPath)
         result.outputDataFolderName(1) = string(outputFolderName);
     end
 
-    if ismember('rawData', result.Properties.VariableNames)
-        result.rawData(1) = "default_value";
-    end
+    % Keep rawData from first CSV (don't modify it)
+    % if ismember('rawData', result.Properties.VariableNames)
+    %     result.rawData(1) = "default_value";
+    % end
 
     if ismember('spreadSheetFileName', result.Properties.VariableNames)
         result.spreadSheetFileName(1) = string(divMergedCsvPath);
     end
 
-    % Write the final merged data to output file
+    % Apply specialized handling to remove NaN values from all columns
+    result = removeNaNValues(result);
+
+    % Write the final merged data to output file with full precision
+    % Using 'Precision', 'full' ensures all decimal places are preserved
+    writetableOptions = {'Delimiter', ',', 'QuoteStrings', true, 'FileType', 'text'};
+    
+    % Use custom writer to preserve full decimal precision
     outputCsvFile = fullfile(outputFolder, ['Parameters_' outputFolderName '.csv']);
-    writetable(result, outputCsvFile);
+    writeTableWithFullPrecision(result, outputCsvFile);
     fprintf('Successfully wrote merged parameter CSV file to: %s\n', outputCsvFile);
+end
+
+function resultTable = removeNaNValues(inputTable)
+    % removeNaNValues - Helper function to replace NaN values with appropriate empty values
+    %
+    % This function processes a table and replaces NaN values according to column type:
+    % - For string columns: NaN becomes empty string ""
+    % - For numeric columns: NaN is preserved but will be written as empty to CSV
+    % - For cell columns: NaN becomes empty cell {}
+    % - For categorical columns: NaN becomes <undefined>
+    
+    resultTable = inputTable;
+    varNames = resultTable.Properties.VariableNames;
+    
+    % Create a temporary table to use during the transformation
+    tempTable = table();
+    
+    % Process each column
+    for i = 1:length(varNames)
+        varName = varNames{i};
+        columnData = resultTable.(varName);
+        
+        % Handle different data types
+        if isa(columnData, 'string')
+            % For string arrays, replace missing values with empty strings
+            columnData(ismissing(columnData)) = "";
+            tempTable.(varName) = columnData;
+        elseif isa(columnData, 'cell')
+            % For cell arrays, replace NaN cells with empty cells
+            nanIdx = cellfun(@(x) isa(x, 'double') && isnan(x), columnData);
+            if any(nanIdx)
+                columnData(nanIdx) = {''};
+            end
+            tempTable.(varName) = columnData;
+        elseif isa(columnData, 'double') || isa(columnData, 'single')
+            % For numeric data, keep full precision but convert NaNs to empty
+            if any(isnan(columnData))
+                % Create a cell array to handle mixed numeric and empty data
+                cellData = cell(size(columnData));
+                for j = 1:numel(columnData)
+                    if isnan(columnData(j))
+                        cellData{j} = '';
+                    else
+                        cellData{j} = columnData(j);
+                    end
+                end
+                tempTable.(varName) = cellData;
+            else
+                % No NaNs, keep as numeric for full precision
+                tempTable.(varName) = columnData;
+            end
+        elseif isa(columnData, 'categorical')
+            % For categorical, convert NaN to <undefined>
+            columnData(isundefined(columnData)) = categorical({''});
+            tempTable.(varName) = columnData;
+        else
+            % For other types, keep as is
+            tempTable.(varName) = columnData;
+        end
+    end
+    
+    resultTable = tempTable;
+end
+
+function writeTableWithFullPrecision(data, filename)
+    % Custom function to write table with full numeric precision
+    
+    % Get variable names
+    varNames = data.Properties.VariableNames;
+    numVars = length(varNames);
+    
+    % Open file for writing
+    fileID = fopen(filename, 'w');
+    if fileID == -1
+        error('Could not open file for writing: %s', filename);
+    end
+    
+    % Write header
+    fprintf(fileID, '%s', varNames{1});
+    for i = 2:numVars
+        fprintf(fileID, ',%s', varNames{i});
+    end
+    fprintf(fileID, '\n');
+    
+    % Write data rows
+    numRows = height(data);
+    for row = 1:numRows
+        % Process each column in the row
+        for col = 1:numVars
+            if col > 1
+                fprintf(fileID, ',');
+            end
+            
+            % Get the current value
+            value = data{row, col};
+            
+            % Handle different types of data
+            if iscell(value)
+                % Cell value
+                cellValue = value{1};
+                if isempty(cellValue)
+                    % Empty - write nothing
+                    fprintf(fileID, '');
+                elseif ischar(cellValue) || isstring(cellValue)
+                    % Text - quote if needed
+                    fprintf(fileID, '"%s"', strrep(char(cellValue), '"', '""'));
+                elseif isnumeric(cellValue)
+                    % Numeric - write with full precision
+                    if isnan(cellValue)
+                        fprintf(fileID, '');
+                    else
+                        fprintf(fileID, '%.15g', cellValue);
+                    end
+                else
+                    % Other types
+                    fprintf(fileID, '"%s"', char(string(cellValue)));
+                end
+            elseif ischar(value) || isstring(value)
+                % Text - quote if needed
+                if isempty(char(value))
+                    fprintf(fileID, '');
+                else
+                    fprintf(fileID, '"%s"', strrep(char(value), '"', '""'));
+                end
+            elseif isnumeric(value)
+                % Numeric - write with full precision
+                if isnan(value)
+                    fprintf(fileID, '');
+                else
+                    fprintf(fileID, '%.15g', value);
+                end
+            elseif iscategorical(value)
+                % Categorical
+                if isundefined(value)
+                    fprintf(fileID, '');
+                else
+                    fprintf(fileID, '"%s"', char(value));
+                end
+            else
+                % Other types
+                fprintf(fileID, '"%s"', char(string(value)));
+            end
+        end
+        fprintf(fileID, '\n');
+    end
+    
+    % Close the file
+    fclose(fileID);
 end
