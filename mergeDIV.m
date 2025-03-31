@@ -22,6 +22,9 @@ function mergeDIV(divFolders, outputFolder)
     % Step 3: Copy data files from all input folders
     copyDataFiles(divFolders, outputFolder);
     
+    % Step 4: Merge CSV files
+    mergeCSVFiles(divFolders, outputFolder);
+    
     fprintf('DIV merging completed successfully.\n');
 end
 
@@ -218,5 +221,103 @@ function copyDataFiles(divFolders, outputFolder)
         else
             warning('ExperimentMatFiles folder not found in %s', divFolder);
         end
+    end
+end
+
+function mergeCSVFiles(divFolders, outputFolder)
+    % Initialize empty table for merging
+    mergedData = [];
+    
+    % Process each input DIV folder
+    for i = 1:length(divFolders)
+        divFolder = divFolders{i};
+        fprintf('Processing CSV files in %s...\n', divFolder);
+        
+        % Find all CSV files in the input folder
+        csvFiles = dir(fullfile(divFolder, '*.csv'));
+        
+        % Filter out Parameters.csv files
+        nonParameterCSVs = {};
+        for j = 1:length(csvFiles)
+            if ~contains(csvFiles(j).name, 'Parameters')
+                nonParameterCSVs{end+1} = csvFiles(j).name;
+            end
+        end
+        
+        % Check if we found exactly one non-Parameters CSV
+        if length(nonParameterCSVs) == 1
+            csvFile = nonParameterCSVs{1};
+            fprintf('Found CSV file to merge: %s\n', csvFile);
+            
+            % Read the CSV file
+            sourceFile = fullfile(divFolder, csvFile);
+            try
+                % Try reading with readtable (better for CSV with headers)
+                csvData = readtable(sourceFile, 'TextType', 'string');
+                
+                % If this is the first data we're reading, use it to initialize the merged data
+                if isempty(mergedData)
+                    mergedData = csvData;
+                else
+                    % Otherwise, concatenate with existing data
+                    % Make sure column names match (case-sensitive)
+                    if isequal(csvData.Properties.VariableNames, mergedData.Properties.VariableNames)
+                        mergedData = [mergedData; csvData];
+                    else
+                        warning('CSV file %s has different column names than previous files. Skipping.', sourceFile);
+                        fprintf('Expected columns: %s\n', strjoin(mergedData.Properties.VariableNames, ', '));
+                        fprintf('Found columns: %s\n', strjoin(csvData.Properties.VariableNames, ', '));
+                    end
+                end
+            catch e
+                warning('Error reading CSV file %s: %s', sourceFile, e.message);
+                
+                % Try alternative CSV reading methods if readtable fails
+                try
+                    % Try csvread (simpler, numeric only, no headers)
+                    csvData = csvread(sourceFile);
+                    
+                    % If this is the first data we're reading, use it
+                    if isempty(mergedData)
+                        mergedData = csvData;
+                    else
+                        % Check if dimensions match
+                        if size(csvData, 2) == size(mergedData, 2)
+                            mergedData = [mergedData; csvData];
+                        else
+                            warning('CSV file %s has different number of columns than previous files. Skipping.', sourceFile);
+                        end
+                    end
+                catch e2
+                    warning('Failed to read CSV file %s using alternative method: %s', sourceFile, e2.message);
+                end
+            end
+        elseif isempty(nonParameterCSVs)
+            warning('No non-Parameters CSV files found in %s', divFolder);
+        else
+            warning('Multiple non-Parameters CSV files found in %s, expected only one.', divFolder);
+            fprintf('Found files: %s\n', strjoin(nonParameterCSVs, ', '));
+        end
+    end
+    
+    % Write the merged data to the output folder
+    if ~isempty(mergedData)
+        destFile = fullfile(outputFolder, 'div_merged.csv');
+        fprintf('Writing merged CSV data to %s\n', destFile);
+        
+        try
+            if istable(mergedData)
+                % Write table to CSV
+                writetable(mergedData, destFile);
+            else
+                % Write matrix to CSV
+                csvwrite(destFile, mergedData);
+            end
+            fprintf('Successfully wrote merged CSV file\n');
+        catch e
+            warning('Error writing merged CSV file: %s', e.message);
+        end
+    else
+        warning('No CSV data was merged, cannot write output file');
     end
 end
