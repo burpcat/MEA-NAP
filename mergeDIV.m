@@ -310,8 +310,47 @@ function mergeCSVFiles(divFolders, outputFolder)
         
         try
             if istable(mergedData)
-                % Write table to CSV
-                writetable(mergedData, destFile);
+                % Rename columns to match required format
+                if ismember('RecordingFilename', mergedData.Properties.VariableNames)
+                    mergedData.Properties.VariableNames{'RecordingFilename'} = 'Recording filename';
+                end
+                if ismember('DIVGroup', mergedData.Properties.VariableNames)
+                    mergedData.Properties.VariableNames{'DIVGroup'} = 'DIV group';
+                end
+                
+                % Handle Ground column - replace NaN with empty string
+                if ismember('Ground', mergedData.Properties.VariableNames)
+                    % Create custom table for writing with empty Ground column
+                    customTable = mergedData;
+                    
+                    % Check the type of the Ground column
+                    groundCol = customTable.Ground;
+                    
+                    % Convert to cell array if it's not already
+                    if ~iscell(groundCol)
+                        % Convert to cell array of appropriate type
+                        groundCellArray = cell(height(customTable), 1);
+                        
+                        % For each row, set to empty string
+                        for idx = 1:height(customTable)
+                            groundCellArray{idx} = '';
+                        end
+                        
+                        % Replace the Ground column
+                        customTable.Ground = groundCellArray;
+                    else
+                        % Already a cell array, replace contents with empty strings
+                        for idx = 1:height(customTable)
+                            customTable.Ground{idx} = '';
+                        end
+                    end
+                    
+                    % Write the modified table
+                    writetable(customTable, destFile);
+                else
+                    % No Ground column, just write the table with renamed columns
+                    writetable(mergedData, destFile);
+                end
             else
                 % Write matrix to CSV
                 csvwrite(destFile, mergedData);
