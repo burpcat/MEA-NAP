@@ -409,155 +409,204 @@ function mergeParameterCSV(parameterCsvFiles, outputFolder, divMergedCsvPath)
     %   parameterCsvFiles - Cell array of strings containing paths to parameter CSV files
     %   outputFolder - String containing the path to the output folder
     %   divMergedCsvPath - Path to the merged DIV CSV file
-    
+
     % Get output folder name
     [~, outputFolderName] = fileparts(outputFolder);
-    
+
     % Check if we have any input files
     if isempty(parameterCsvFiles)
         error('No parameter CSV files provided');
     end
-    
-    % Initialize channel and coordinate offsets
-    channelOffset = 0;
-    coordOffset = 0;
-    
-    % Process the first file as our base
-    fprintf('Processing first parameter file as base: %s\n', parameterCsvFiles{1});
-    mergedData = readtable(parameterCsvFiles{1}, 'TextType', 'string');
-    
+
+    % Read all parameter CSV files
+    allData = cell(length(parameterCsvFiles), 1);
+    for i = 1:length(parameterCsvFiles)
+        allData{i} = readtable(parameterCsvFiles{i}, 'TextType', 'string');
+    end
+
+    % Create a new table for the merged data, starting with the first file
+    mergedData = allData{1};
+
     % Update the specific fields in the merged data
     if ismember('outputDataFolderName', mergedData.Properties.VariableNames)
         mergedData.outputDataFolderName(1) = string(outputFolderName);
-        fprintf('Updated outputDataFolderName to: %s\n', outputFolderName);
     end
-    
+
     if ismember('rawData', mergedData.Properties.VariableNames)
         mergedData.rawData(1) = "default_value";
-        fprintf('Set rawData to default value\n');
     end
-    
+
     if ismember('spreadSheetFileName', mergedData.Properties.VariableNames)
         mergedData.spreadSheetFileName(1) = string(divMergedCsvPath);
-        fprintf('Updated spreadSheetFileName to: %s\n', divMergedCsvPath);
     end
-    
-    % Find the highest channel and coordinate indices in the first file
+
+    % Define column patterns
     channelColPattern = 'channels_(\d+)_(\d+)';
     coordColPattern = 'coords_(\d+)_(\d+)';
-    varNames = mergedData.Properties.VariableNames;
-    
-    maxChannelRow = 0;
-    maxCoordRow = 0;
-    
-    for i = 1:length(varNames)
-        % Check if column is a channel column
-        channelMatch = regexp(varNames{i}, channelColPattern, 'tokens');
-        if ~isempty(channelMatch)
-            row = str2double(channelMatch{1}{1});
-            maxChannelRow = max(maxChannelRow, row);
-        end
-        
-        % Check if column is a coord column
-        coordMatch = regexp(varNames{i}, coordColPattern, 'tokens');
-        if ~isempty(coordMatch)
-            row = str2double(coordMatch{1}{1});
-            maxCoordRow = max(maxCoordRow, row);
+
+    % 1. First, collect all columns that are not channels or coords
+    allNonSpecialCols = {};
+    for i = 1:length(allData)
+        varNames = allData{i}.Properties.VariableNames;
+        for j = 1:length(varNames)
+            varName = varNames{j};
+
+            % Skip channel and coord columns
+            if ~isempty(regexp(varName, channelColPattern, 'once')) || ...
+               ~isempty(regexp(varName, coordColPattern, 'once'))
+                continue;
+            end
+
+            % Add non-special column to our list if not already there
+            if ~ismember(varName, allNonSpecialCols)
+                allNonSpecialCols{end+1} = varName;
+            end
         end
     end
-    
-    fprintf('First file has channels up to row %d and coords up to row %d\n', maxChannelRow, maxCoordRow);
-    
-    % Update offsets for next file
-    channelOffset = maxChannelRow;
-    coordOffset = maxCoordRow;
-    
-    % If we have a DivNm column, we'll need to rename it if there are multiple files
-    hasDivNm = ismember('DivNm', mergedData.Properties.VariableNames);
-    
-    % Process each additional file
-    for fileIdx = 2:length(parameterCsvFiles)
-        fprintf('Processing parameter file %d of %d: %s\n', fileIdx, length(parameterCsvFiles), parameterCsvFiles{fileIdx});
-        
-        % Read the current file
-        currentFile = readtable(parameterCsvFiles{fileIdx}, 'TextType', 'string');
-        currentVarNames = currentFile.Properties.VariableNames;
-        
-        % Find channel and coordinate columns
+
+    % 2. Create a new table to hold the result
+    result = table();
+
+    % 3. Process all channel columns first (in order)
+    channelOffset = 0;
+    for i = 1:length(allData)
+        varNames = allData{i}.Properties.VariableNames;
+
+        % Find all channel columns in this file
         channelCols = {};
-        coordCols = {};
-        
-        for i = 1:length(currentVarNames)
-            varName = currentVarNames{i};
-            
-            % Check if column is a channel column
+        channelRowIndices = [];
+        channelColIndices = [];
+
+        for j = 1:length(varNames)
+            varName = varNames{j};
             channelMatch = regexp(varName, channelColPattern, 'tokens');
+
             if ~isempty(channelMatch)
+                row = str2double(channelMatch{1}{1});
+                col = str2double(channelMatch{1}{2});
+
                 channelCols{end+1} = varName;
-            end
-            
-            % Check if column is a coord column
-            coordMatch = regexp(varName, coordColPattern, 'tokens');
-            if ~isempty(coordMatch)
-                coordCols{end+1} = varName;
+                channelRowIndices(end+1) = row;
+                channelColIndices(end+1) = col;
             end
         end
-        
-        % Add channel columns with renamed indices to merged data
-        for i = 1:length(channelCols)
-            oldName = channelCols{i};
+
+        % Sort the channel columns by row, then by column
+        [~, sortIdx] = sortrows([channelRowIndices', channelColIndices']);
+        channelCols = channelCols(sortIdx);
+
+        % Add channel columns to result, renaming as needed
+        for j = 1:length(channelCols)
+            oldName = channelCols{j};
             channelMatch = regexp(oldName, channelColPattern, 'tokens');
             row = str2double(channelMatch{1}{1});
             col = str2double(channelMatch{1}{2});
-            
-            % Create new column name with adjusted row index
+
+            % Calculate new row index
             newRow = row + channelOffset;
             newName = sprintf('channels_%d_%d', newRow, col);
-            
-            % Add this column to mergedData
-            mergedData.(newName) = currentFile.(oldName)(1);
+
+            % Add to result table
+            result.(newName) = allData{i}.(oldName)(1);
         end
-        
-        % Add coordinate columns with renamed indices to merged data
-        for i = 1:length(coordCols)
-            oldName = coordCols{i};
+
+        % Update offset for next file
+        if ~isempty(channelRowIndices)
+            channelOffset = channelOffset + max(channelRowIndices);
+        end
+    end
+
+    % 4. Process all coordinate columns next (in order)
+    coordOffset = 0;
+    for i = 1:length(allData)
+        varNames = allData{i}.Properties.VariableNames;
+
+        % Find all coord columns in this file
+        coordCols = {};
+        coordRowIndices = [];
+        coordColIndices = [];
+
+        for j = 1:length(varNames)
+            varName = varNames{j};
+            coordMatch = regexp(varName, coordColPattern, 'tokens');
+
+            if ~isempty(coordMatch)
+                row = str2double(coordMatch{1}{1});
+                col = str2double(coordMatch{1}{2});
+
+                coordCols{end+1} = varName;
+                coordRowIndices(end+1) = row;
+                coordColIndices(end+1) = col;
+            end
+        end
+
+        % Sort the coord columns by row, then by column
+        [~, sortIdx] = sortrows([coordRowIndices', coordColIndices']);
+        coordCols = coordCols(sortIdx);
+
+        % Add coord columns to result, renaming as needed
+        for j = 1:length(coordCols)
+            oldName = coordCols{j};
             coordMatch = regexp(oldName, coordColPattern, 'tokens');
             row = str2double(coordMatch{1}{1});
             col = str2double(coordMatch{1}{2});
-            
-            % Create new column name with adjusted row index
+
+            % Calculate new row index
             newRow = row + coordOffset;
             newName = sprintf('coords_%d_%d', newRow, col);
-            
-            % Add this column to mergedData
-            mergedData.(newName) = currentFile.(oldName)(1);
+
+            % Add to result table
+            result.(newName) = allData{i}.(oldName)(1);
         end
-        
-        % Handle DivNm column
-        if fileIdx == 2 && hasDivNm
-            % For the second file, rename DivNm to DivNm1 in the merged data
-            divNmValue = mergedData.DivNm(1);
-            
-            % Create a new column DivNm1 with the value from DivNm
-            mergedData.DivNm1 = divNmValue;
-            
-            % Remove the original DivNm column
-            mergedData = removevars(mergedData, 'DivNm');
+
+        % Update offset for next file
+        if ~isempty(coordRowIndices)
+            coordOffset = coordOffset + max(coordRowIndices);
         end
-        
-        % Add DivNm from current file as DivNmX
-        if ismember('DivNm', currentFile.Properties.VariableNames)
-            newDivNmCol = sprintf('DivNm%d', fileIdx);
-            mergedData.(newDivNmCol) = currentFile.DivNm(1);
-        end
-        
-        % Update offsets for next file (assuming standard 24 rows per file)
-        channelOffset = channelOffset + 24;
-        coordOffset = coordOffset + 24;
     end
-    
+
+    % 5. Finally, add all non-special columns
+    for i = 1:length(allNonSpecialCols)
+        colName = allNonSpecialCols{i};
+
+        % Special handling for DivNm columns
+        if strcmp(colName, 'DivNm')
+            % First file's DivNm becomes DivNm1
+            result.DivNm1 = allData{1}.DivNm(1);
+
+            % Add DivNm from other files
+            for j = 2:length(allData)
+                if ismember('DivNm', allData{j}.Properties.VariableNames)
+                    newColName = sprintf('DivNm%d', j);
+                    result.(newColName) = allData{j}.DivNm(1);
+                end
+            end
+        else
+            % For all other columns, take value from first file that has it
+            for j = 1:length(allData)
+                if ismember(colName, allData{j}.Properties.VariableNames)
+                    result.(colName) = allData{j}.(colName)(1);
+                    break;
+                end
+            end
+        end
+    end
+
+    % 6. Update specific fields again to ensure they're correct
+    if ismember('outputDataFolderName', result.Properties.VariableNames)
+        result.outputDataFolderName(1) = string(outputFolderName);
+    end
+
+    if ismember('rawData', result.Properties.VariableNames)
+        result.rawData(1) = "default_value";
+    end
+
+    if ismember('spreadSheetFileName', result.Properties.VariableNames)
+        result.spreadSheetFileName(1) = string(divMergedCsvPath);
+    end
+
     % Write the final merged data to output file
     outputCsvFile = fullfile(outputFolder, ['Parameters_' outputFolderName '.csv']);
-    writetable(mergedData, outputCsvFile);
+    writetable(result, outputCsvFile);
     fprintf('Successfully wrote merged parameter CSV file to: %s\n', outputCsvFile);
 end
