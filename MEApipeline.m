@@ -180,6 +180,13 @@ setUpSpreadSheet  % import metadata from spreadsheet
 % create output data folder if doesn't exist
 CreateOutputFolders(Params.outputDataFolder, Params.GrpNm, Params)
 
+% Create graph data folder and enable export
+Params.graphDataFolder = fullfile(Params.outputDataFolder, Params.outputDataFolderName, 'GraphData');
+Params.saveGraphData = 1; % Set to 0 to disable graph data export
+if ~isfolder(Params.graphDataFolder)
+    mkdir(Params.graphDataFolder);
+end
+
 % Set up one figure handle to save all the figures
 oneFigureHandle = NaN;
 oneFigureHandle = checkOneFigureHandle(Params, oneFigureHandle);
@@ -314,6 +321,12 @@ if ((Params.priorAnalysis == 0) || (Params.runSpikeCheckOnPrevSpikeData)) && (Pa
         % Check whether there are no spikes at all in the recording 
         checkIfAnySpikes(spikeTimes, ExpName{ExN});
 
+        % Export spike data for visualization
+        if Params.saveGraphData
+            expData = struct('spikeTimes', spikeTimes, 'Info', Info, 'channels', channels);
+            exportGraphData('spike', expData, Params);
+        end
+
     end
 
     
@@ -435,6 +448,13 @@ if Params.startAnalysisStep < 3
             infoFnFilePath = fullfile(experimentMatFolderPath, ...
                               strcat(char(Info.FN),'_',Params.outputDataFolderName,'.mat'));
             save(infoFnFilePath,'Info','Params','spikeTimes', 'spikeMatrix', 'Ephys', '-v7.3')
+
+            % Export neuronal activity data for visualization
+            if Params.saveGraphData
+                expData = struct('Ephys', Ephys, 'Info', Info, 'spikeMatrix', spikeMatrix, 'coords', Params.coords{ExN}, 'channels', Info.channels);
+                exportGraphData('ephys', expData, Params, ExN);
+            end
+
         else 
             expData = load(experimentMatFpath);
             activityStats = calTwopActivityStats(expData, Params);
@@ -650,6 +670,21 @@ if Params.priorAnalysis==0 || Params.priorAnalysis==1 && Params.startAnalysisSte
             varsToSave = {'Info', 'Params', 'spikeTimes', 'Ephys', 'adjMs'};
 
             save(infoFnFilePath, varsToSave{:}, '-append')
+
+            % Export adjacency matrices for visualization
+            if Params.saveGraphData
+                expData = struct('adjMs', adjMs, 'Info', Info, 'channels', Info.channels);
+                if isfield(Params, 'coords') && length(Params.coords) >= ExN
+                    expData.coords = Params.coords{ExN};
+                end
+                exportGraphData('adjmatrix', expData, Params);
+            end
+
+            % Export suite2p data for visualization
+            if Params.saveGraphData && Params.suite2pMode == 1 && exist('spks', 'var')
+                expData = struct('spks', spks, 'Info', Info, 'coords', coords, 'channels', channels, 'adjMs', adjMs);
+                exportGraphData('ephys', expData, Params, ExN);
+            end
         end
     end 
     
@@ -798,6 +833,12 @@ if Params.priorAnalysis==0 || Params.priorAnalysis==1 && Params.startAnalysisSte
 
             save(infoFnFilePath, varsToSave{:}, '-append')
 
+            % Export network metrics for visualization
+            if Params.saveGraphData
+                expData = struct('NetMet', NetMet, 'Info', Info, 'coords', coords, 'channels', channels);
+                exportGraphData('netmet', expData, Params);
+            end
+
             clear adjMs
 
         end
@@ -927,6 +968,12 @@ if Params.priorAnalysis==0 || Params.priorAnalysis==1 && Params.startAnalysisSte
             adjMs = expData.adjMs;  % evaluated here for saving purpose
             Info = expData.Info;
             save(experimentMatFilePathToSaveTo, varsToSave{:}, '-append')
+
+            % Export node cartography data for visualization
+            if Params.saveGraphData
+                cartographyExpData = struct('NetMet', NetMet, 'Info', Info, 'coords', coords, 'channels', channels);
+                exportGraphData('nodecartography', cartographyExpData, Params);
+            end
         end
     end 
         
