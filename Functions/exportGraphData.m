@@ -130,13 +130,13 @@ end
 end
 
 function exportEphysData(expData, expName, saveFolder, Params, ExN)
-% Export neuronal activity data (Ephys)
+Export neuronal activity data (Ephys)
 
 if ~isfield(expData, 'Ephys')
     return;
 end
 
-% Prepare activity data
+Prepare activity data
 activityData = struct();
 ephysFields = {'FR', 'channelBurstRate', 'channelBurstDur', 'channelFracSpikesInBursts', ...
     'channelISIwithinBurst', 'channeISIoutsideBurst'};
@@ -147,7 +147,7 @@ for i = 1:length(ephysFields)
     end
 end
 
-% Add coordinates and channels
+Add coordinates and channels
 if isfield(expData, 'coords')
     activityData.coords = expData.coords;
 elseif isfield(Params, 'coords') && ExN <= length(Params.coords)
@@ -160,7 +160,7 @@ elseif isfield(expData.Info, 'channels')
     activityData.channels = expData.Info.channels;
 end
 
-% Save activity data
+Save activity data
 filePath = fullfile(saveFolder, [expName, '_electrodeSpikeActivity.mat']);
 save(filePath, 'activityData');
 fprintf('Saved electrode activity data: %s\n', filePath);
