@@ -130,24 +130,25 @@ end
 end
 
 function exportEphysData(expData, expName, saveFolder, Params, ExN)
-Export neuronal activity data (Ephys)
+% Export neuronal activity data (Ephys) - both electrode-level and recording-level metrics
+% Modified to export the exact metrics that PlotEphysStats.m is using
 
 if ~isfield(expData, 'Ephys')
     return;
 end
 
-Prepare activity data
+% Prepare electrode-level activity data
 activityData = struct();
-ephysFields = {'FR', 'channelBurstRate', 'channelBurstDur', 'channelFracSpikesInBursts', ...
+ephysElectrodeFields = {'FR', 'channelBurstRate', 'channelBurstDur', 'channelFracSpikesInBursts', ...
     'channelISIwithinBurst', 'channeISIoutsideBurst'};
 
-for i = 1:length(ephysFields)
-    if isfield(expData.Ephys, ephysFields{i})
-        activityData.(ephysFields{i}) = expData.Ephys.(ephysFields{i});
+for i = 1:length(ephysElectrodeFields)
+    if isfield(expData.Ephys, ephysElectrodeFields{i})
+        activityData.(ephysElectrodeFields{i}) = expData.Ephys.(ephysElectrodeFields{i});
     end
 end
 
-Add coordinates and channels
+% Add coordinates and channels
 if isfield(expData, 'coords')
     activityData.coords = expData.coords;
 elseif isfield(Params, 'coords') && ExN <= length(Params.coords)
@@ -160,10 +161,53 @@ elseif isfield(expData.Info, 'channels')
     activityData.channels = expData.Info.channels;
 end
 
-Save activity data
+% Save electrode-level activity data
 filePath = fullfile(saveFolder, [expName, '_electrodeSpikeActivity.mat']);
 save(filePath, 'activityData');
 fprintf('Saved electrode activity data: %s\n', filePath);
+
+% Now prepare recording-level activity data - extract the exact fields used in PlotEphysStats.m
+recordingData = struct();
+
+% Extract the metrics exactly as they appear in NetMetricsE in PlotEphysStats.m
+ephysRecordingFields = {'numActiveElec', 'FRmean', 'FRmedian', 'NBurstRate', ...
+    'meanNumChansInvolvedInNbursts', 'meanNBstLengthS', 'meanISIWithinNbursts_ms', ...
+    'meanISIoutsideNbursts_ms', 'CVofINBI', 'fracInNburst', 'channelAveBurstRate', ...
+    'channelAveBurstDur', 'channelAveISIwithinBurst', 'channelAveISIoutsideBurst', ...
+    'channelAveFracSpikesInBursts'};
+
+% Also add other potentially useful recording-level metrics
+additionalRecordingFields = {'FRstd', 'FRsem', 'FRiqr', 'numNbursts'};
+allRecordingFields = [ephysRecordingFields, additionalRecordingFields];
+
+for i = 1:length(allRecordingFields)
+    fieldName = allRecordingFields{i};
+    if isfield(expData.Ephys, fieldName)
+        recordingData.(fieldName) = expData.Ephys.(fieldName);
+    end
+end
+
+% Add additional recording-level information
+if isfield(expData.Info, 'DIV')
+    recordingData.DIV = expData.Info.DIV;
+end
+if isfield(expData.Info, 'Grp')
+    recordingData.Grp = expData.Info.Grp;
+end
+if isfield(expData.Info, 'duration_s')
+    recordingData.duration_s = expData.Info.duration_s;
+end
+
+% Save recording-level activity data
+recordingFilePath = fullfile(saveFolder, [expName, '_recordingSpikeActivity.mat']);
+save(recordingFilePath, 'recordingData');
+fprintf('Saved recording-level activity data: %s\n', recordingFilePath);
+
+% For debugging - log what fields were exported
+recordingFieldNames = fieldnames(recordingData);
+fprintf('Recording-level fields exported (%d total): ', length(recordingFieldNames));
+fprintf('%s, ', recordingFieldNames{:});
+fprintf('\n');
 end
 
 function exportAdjMatrixData(expData, expName, saveFolder, Params)
@@ -191,26 +235,40 @@ end
 end
 
 function exportNetMetData(expData, expName, saveFolder, Params)
-% Export network metrics
-
+ % Export network metrics
 if ~isfield(expData, 'NetMet')
     return;
 end
-
 % Export network metrics for each lag value
 for lagIdx = 1:length(Params.FuncConLagval)
     lagVal = Params.FuncConLagval(lagIdx);
+    lagFieldName = sprintf('adjM%.fmslag', lagVal);
     
     % Prepare node-level metrics
     nodeMetrics = struct();
     metricFields = {'degree', 'strength', 'clustering', 'betweenness', 'efficiency_local', ...
         'participation', 'control_average', 'control_modal'};
     
+    % Get the number of channels for empty metrics
+    if isfield(expData, 'channels')
+        channelCount = length(expData.channels);
+    elseif isfield(expData.Info, 'channels')
+        channelCount = length(expData.Info.channels);
+    elseif isfield(expData, 'coords')
+        channelCount = size(expData.coords, 1);
+    else
+        channelCount = 0;
+    end
+    
+    % Extract metrics from the correct nested structure
     for mIdx = 1:length(metricFields)
         fieldName = metricFields{mIdx};
-        metricFieldName = sprintf('%s%.fmslag', fieldName, lagVal);
-        if isfield(expData.NetMet, metricFieldName)
-            nodeMetrics.(fieldName) = expData.NetMet.(metricFieldName);
+        % Check if the lag field and the metric field exist
+        if isfield(expData.NetMet, lagFieldName) && isfield(expData.NetMet.(lagFieldName), fieldName)
+            nodeMetrics.(fieldName) = expData.NetMet.(lagFieldName).(fieldName);
+        else
+            % If not available, create an empty array with correct dimensions
+            nodeMetrics.(fieldName) = zeros(channelCount, 1);
         end
     end
     
@@ -225,15 +283,14 @@ for lagIdx = 1:length(Params.FuncConLagval)
     end
     
     % Save node metrics
-    nodeFilename = sprintf('%s_nodeMetrics_lag%d.mat', expName, lagVal);
+    nodeFilename = sprintf('%s_nodeMetrics_lag%.f.mat', expName, lagVal);
     nodeFilePath = fullfile(saveFolder, nodeFilename);
     save(nodeFilePath, 'nodeMetrics');
-    fprintf('Saved node metrics (lag %d): %s\n', lagVal, nodeFilePath);
+    fprintf('Saved node metrics (lag %.f): %s\n', lagVal, nodeFilePath);
     
     % Prepare network-level metrics
     netMetrics = struct();
     netMetricFields = {'density', 'efficiency_global', 'modularity', 'smallworldness'};
-    
     for mIdx = 1:length(netMetricFields)
         fieldName = netMetricFields{mIdx};
         metricFieldName = sprintf('%s%.fmslag', fieldName, lagVal);
@@ -243,10 +300,10 @@ for lagIdx = 1:length(Params.FuncConLagval)
     end
     
     % Save network metrics
-    netFilename = sprintf('%s_networkMetrics_lag%d.mat', expName, lagVal);
+    netFilename = sprintf('%s_networkMetrics_lag%.f.mat', expName, lagVal);
     netFilePath = fullfile(saveFolder, netFilename);
     save(netFilePath, 'netMetrics');
-    fprintf('Saved network metrics (lag %d): %s\n', lagVal, netFilePath);
+    fprintf('Saved network metrics (lag %.f): %s\n', lagVal, netFilePath);
 end
 end
 
