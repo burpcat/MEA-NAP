@@ -1,14 +1,14 @@
 function exportGraphData(dataStage, expData, Params, ExN)
 % Centralized function to export graph data at different pipeline stages
+% CORRECTED VERSION - Fixed field names and added all required metrics
 %
 % Inputs:
-%   dataStage - string indicating the pipeline stage ('spike', 'adjmatrix', 'netmet', etc.)
+%   dataStage - string indicating the pipeline stage ('spike', 'ephys', 'adjmatrix', 'netmet', 'nodecartography', 'all')
 %   expData - structure containing experiment data (can include Info, adjMs, NetMet, etc.)
 %   Params - pipeline parameters structure
 %   ExN - experiment number (optional, only needed for certain stages)
 %
-% This function automatically determines what data is available and saves it
-% to the GraphData folder for later visualization.
+% This function exports all data needed to recreate the 4B_GroupComparisons visualizations
 
 % Check if graph data export is enabled
 if ~isfield(Params, 'saveGraphData') || ~Params.saveGraphData
@@ -46,7 +46,7 @@ else
     groupName = Info.Grp;
 end
 
-% Create folder structure if needed
+% Create folder structure
 groupFolder = fullfile(Params.graphDataFolder, groupName);
 if ~isfolder(groupFolder)
     mkdir(groupFolder);
@@ -57,26 +57,29 @@ if ~isfolder(expFolder)
     mkdir(expFolder);
 end
 
-% Select what to export based on the data stage
+% Export data based on stage
 switch lower(dataStage)
     case 'spike'
-        % Export spike detection data
         exportSpikeData(expData, expName, expFolder);
         
     case 'ephys'
-        % Export neuronal activity data (Ephys)
         exportEphysData(expData, expName, expFolder, Params, ExN);
         
     case 'adjmatrix'
-        % Export adjacency matrices
         exportAdjMatrixData(expData, expName, expFolder, Params);
         
     case 'netmet'
-        % Export network metrics
         exportNetMetData(expData, expName, expFolder, Params);
         
     case 'nodecartography'
-        % Export node cartography data
+        exportNodeCartographyData(expData, expName, expFolder, Params);
+        
+    case 'all'
+        % Export everything available
+        exportSpikeData(expData, expName, expFolder);
+        exportEphysData(expData, expName, expFolder, Params, ExN);
+        exportAdjMatrixData(expData, expName, expFolder, Params);
+        exportNetMetData(expData, expName, expFolder, Params);
         exportNodeCartographyData(expData, expName, expFolder, Params);
         
     otherwise
@@ -86,11 +89,9 @@ end
 end
 
 function exportSpikeData(expData, expName, saveFolder)
-% Export spike detection data
+% Export spike detection data for raster plots and spike analysis
 
-% Check if we have spike data
 if isfield(expData, 'spikeTimes')
-    % Prepare spike data
     spikeData = struct();
     spikeData.spikeTimes = expData.spikeTimes;
     
@@ -100,15 +101,16 @@ if isfield(expData, 'spikeTimes')
         spikeData.channels = expData.Info.channels;
     end
     
-    % Save spike data
+    if isfield(expData, 'Info')
+        spikeData.Info = expData.Info;
+    end
+    
     filePath = fullfile(saveFolder, [expName, '_spikeData.mat']);
     save(filePath, 'spikeData');
-    fprintf('Saved spike data: %s\n', filePath);
+    fprintf('Exported spike data: %s\n', filePath);
 end
 
-% Check if we have spike matrix
 if isfield(expData, 'spikeMatrix')
-    % Prepare raster data
     rasterData = struct();
     rasterData.spikeMatrix = expData.spikeMatrix;
     
@@ -122,247 +124,351 @@ if isfield(expData, 'spikeMatrix')
         rasterData.duration = expData.Info.duration_s;
     end
     
-    % Save raster data
     filePath = fullfile(saveFolder, [expName, '_spikeRaster.mat']);
     save(filePath, 'rasterData');
-    fprintf('Saved spike raster data: %s\n', filePath);
+    fprintf('Exported spike raster data: %s\n', filePath);
 end
 end
 
 function exportEphysData(expData, expName, saveFolder, Params, ExN)
-% Export neuronal activity data (Ephys) - both electrode-level and recording-level metrics
-% Modified to export the exact metrics that PlotEphysStats.m is using
+% Export neuronal activity data - both electrode and recording level metrics
+% Based on what PlotEphysStats.m actually uses
 
 if ~isfield(expData, 'Ephys')
     return;
 end
 
-% Prepare electrode-level activity data
-activityData = struct();
-ephysElectrodeFields = {'FR', 'channelBurstRate', 'channelBurstDur', 'channelFracSpikesInBursts', ...
-    'channelISIwithinBurst', 'channeISIoutsideBurst'};
+% ELECTRODE-LEVEL METRICS (for 2A_IndividualNeuronalAnalysis plots)
+electrodeLevelData = struct();
 
-for i = 1:length(ephysElectrodeFields)
-    if isfield(expData.Ephys, ephysElectrodeFields{i})
-        activityData.(ephysElectrodeFields{i}) = expData.Ephys.(ephysElectrodeFields{i});
+% Corrected field names based on ExtractNetMet.m and pipeline code
+electrodeFields = {
+    'FR',                           % Firing rates
+    'channelBurstRate',            % Channel burst rates  
+    'channelBurstDur',             % Channel burst durations
+    'channelFracSpikesInBursts',   % Fraction of spikes in bursts
+    'channelISIwithinBurst',       % ISI within bursts
+    'channeISIoutsideBurst'        % ISI outside bursts (note: typo in original code)
+};
+
+for i = 1:length(electrodeFields)
+    fieldName = electrodeFields{i};
+    if isfield(expData.Ephys, fieldName)
+        electrodeLevelData.(fieldName) = expData.Ephys.(fieldName);
+    else
+        fprintf('Warning: Electrode field %s not found\n', fieldName);
     end
 end
 
-% Add coordinates and channels
+% Add spatial information
 if isfield(expData, 'coords')
-    activityData.coords = expData.coords;
-elseif isfield(Params, 'coords') && ExN <= length(Params.coords)
-    activityData.coords = Params.coords{ExN};
+    electrodeLevelData.coords = expData.coords;
+elseif isfield(Params, 'coords') && exist('ExN', 'var') && ExN <= length(Params.coords)
+    electrodeLevelData.coords = Params.coords{ExN};
 end
 
 if isfield(expData, 'channels')
-    activityData.channels = expData.channels;
+    electrodeLevelData.channels = expData.channels;
 elseif isfield(expData.Info, 'channels')
-    activityData.channels = expData.Info.channels;
+    electrodeLevelData.channels = expData.Info.channels;
 end
 
-% Save electrode-level activity data
-filePath = fullfile(saveFolder, [expName, '_electrodeSpikeActivity.mat']);
-save(filePath, 'activityData');
-fprintf('Saved electrode activity data: %s\n', filePath);
+% Add experiment info
+electrodeLevelData.Info = expData.Info;
 
-% Now prepare recording-level activity data - extract the exact fields used in PlotEphysStats.m
-recordingData = struct();
+% Save electrode-level data
+filePath = fullfile(saveFolder, [expName, '_electrodeLevelActivity.mat']);
+save(filePath, 'electrodeLevelData');
+fprintf('Exported electrode-level activity data: %s\n', filePath);
 
-% Extract the metrics exactly as they appear in NetMetricsE in PlotEphysStats.m
-ephysRecordingFields = {'numActiveElec', 'FRmean', 'FRmedian', 'NBurstRate', ...
-    'meanNumChansInvolvedInNbursts', 'meanNBstLengthS', 'meanISIWithinNbursts_ms', ...
-    'meanISIoutsideNbursts_ms', 'CVofINBI', 'fracInNburst', 'channelAveBurstRate', ...
-    'channelAveBurstDur', 'channelAveISIwithinBurst', 'channelAveISIoutsideBurst', ...
-    'channelAveFracSpikesInBursts'};
+% RECORDING-LEVEL METRICS (for PlotEphysStats group comparisons)
+recordingLevelData = struct();
 
-% Also add other potentially useful recording-level metrics
-additionalRecordingFields = {'FRstd', 'FRsem', 'FRiqr', 'numNbursts'};
-allRecordingFields = [ephysRecordingFields, additionalRecordingFields];
+% All recording-level fields from PlotEphysStats.m NetMetricsE
+recordingFields = {
+    'numActiveElec',                    % Number of active electrodes
+    'FRmean',                          % Mean firing rate
+    'FRmedian',                        % Median firing rate  
+    'FRstd',                           % Standard deviation of firing rate
+    'FRsem',                           % Standard error of mean firing rate
+    'FRiqr',                           % Interquartile range of firing rate
+    'NBurstRate',                      % Network burst rate
+    'meanNumChansInvolvedInNbursts',   % Mean channels in network bursts
+    'meanNBstLengthS',                 % Mean network burst length (seconds)
+    'meanISIWithinNbursts_ms',         % Mean ISI within network bursts
+    'meanISIoutsideNbursts_ms',        % Mean ISI outside network bursts
+    'CVofINBI',                        % CV of inter-network-burst intervals
+    'fracInNburst',                    % Fraction of spikes in network bursts
+    'channelAveBurstRate',             % Average channel burst rate
+    'channelAveBurstDur',              % Average channel burst duration
+    'channelAveISIwithinBurst',        % Average ISI within bursts
+    'channelAveISIoutsideBurst',       % Average ISI outside bursts
+    'channelAveFracSpikesInBursts',    % Average fraction spikes in bursts
+    'numNbursts'                       % Number of network bursts
+};
 
-for i = 1:length(allRecordingFields)
-    fieldName = allRecordingFields{i};
+for i = 1:length(recordingFields)
+    fieldName = recordingFields{i};
     if isfield(expData.Ephys, fieldName)
-        recordingData.(fieldName) = expData.Ephys.(fieldName);
+        recordingLevelData.(fieldName) = expData.Ephys.(fieldName);
+    else
+        fprintf('Warning: Recording field %s not found\n', fieldName);
     end
 end
 
-% Add additional recording-level information
-if isfield(expData.Info, 'DIV')
-    recordingData.DIV = expData.Info.DIV;
-end
-if isfield(expData.Info, 'Grp')
-    recordingData.Grp = expData.Info.Grp;
-end
+% Add experiment metadata
+recordingLevelData.expName = expName;
+recordingLevelData.Grp = expData.Info.Grp;
+recordingLevelData.DIV = expData.Info.DIV;
 if isfield(expData.Info, 'duration_s')
-    recordingData.duration_s = expData.Info.duration_s;
+    recordingLevelData.duration_s = expData.Info.duration_s;
 end
 
-% Save recording-level activity data
-recordingFilePath = fullfile(saveFolder, [expName, '_recordingSpikeActivity.mat']);
-save(recordingFilePath, 'recordingData');
-fprintf('Saved recording-level activity data: %s\n', recordingFilePath);
+% Save recording-level data
+filePath = fullfile(saveFolder, [expName, '_recordingLevelActivity.mat']);
+save(filePath, 'recordingLevelData');
+fprintf('Exported recording-level activity data: %s\n', filePath);
 
-% For debugging - log what fields were exported
-recordingFieldNames = fieldnames(recordingData);
-fprintf('Recording-level fields exported (%d total): ', length(recordingFieldNames));
-fprintf('%s, ', recordingFieldNames{:});
-fprintf('\n');
 end
 
 function exportAdjMatrixData(expData, expName, saveFolder, Params)
-% Export adjacency matrices
+% Export adjacency matrices for all lag values
 
 if ~isfield(expData, 'adjMs')
     return;
 end
 
-% Export adjacency matrices for each lag value
+% Export for each lag value
 for lagIdx = 1:length(Params.FuncConLagval)
     lagVal = Params.FuncConLagval(lagIdx);
     adjMatrixFieldName = sprintf('adjM%.fmslag', lagVal);
     
     if isfield(expData.adjMs, adjMatrixFieldName)
-        adjM = expData.adjMs.(adjMatrixFieldName);
+        adjMatrixData = struct();
+        adjMatrixData.adjM = expData.adjMs.(adjMatrixFieldName);
+        adjMatrixData.lagValue = lagVal;
+        adjMatrixData.expName = expName;
+        adjMatrixData.Info = expData.Info;
         
-        % Save adjacency matrix
-        filename = sprintf('%s_adjMatrix_lag%d.mat', expName, lagVal);
+        % Add coordinates and channels if available
+        if isfield(expData, 'coords')
+            adjMatrixData.coords = expData.coords;
+        end
+        if isfield(expData, 'channels')
+            adjMatrixData.channels = expData.channels;
+        elseif isfield(expData.Info, 'channels')
+            adjMatrixData.channels = expData.Info.channels;
+        end
+        
+        filename = sprintf('%s_adjMatrix_lag%.f.mat', expName, lagVal);
         filePath = fullfile(saveFolder, filename);
-        save(filePath, 'adjM');
-        fprintf('Saved adjacency matrix (lag %d): %s\n', lagVal, filePath);
+        save(filePath, 'adjMatrixData');
+        fprintf('Exported adjacency matrix (lag %.f): %s\n', lagVal, filePath);
     end
 end
 end
 
 function exportNetMetData(expData, expName, saveFolder, Params)
- % Export network metrics
+% Export ALL network metrics - corrected field names based on ExtractNetMet.m
+% This exports data needed for ALL 4B_GroupComparisons plots
+
 if ~isfield(expData, 'NetMet')
     return;
 end
-% Export network metrics for each lag value
+
+% Export for each lag value
 for lagIdx = 1:length(Params.FuncConLagval)
     lagVal = Params.FuncConLagval(lagIdx);
     lagFieldName = sprintf('adjM%.fmslag', lagVal);
     
-    % Prepare node-level metrics
-    nodeMetrics = struct();
-    metricFields = {'degree', 'strength', 'clustering', 'betweenness', 'efficiency_local', ...
-        'participation', 'control_average', 'control_modal'};
-    
-    % Get the number of channels for empty metrics
-    if isfield(expData, 'channels')
-        channelCount = length(expData.channels);
-    elseif isfield(expData.Info, 'channels')
-        channelCount = length(expData.Info.channels);
-    elseif isfield(expData, 'coords')
-        channelCount = size(expData.coords, 1);
-    else
-        channelCount = 0;
+    if ~isfield(expData.NetMet, lagFieldName)
+        continue;
     end
     
-    % Extract metrics from the correct nested structure
-    for mIdx = 1:length(metricFields)
-        fieldName = metricFields{mIdx};
-        % Check if the lag field and the metric field exist
-        if isfield(expData.NetMet, lagFieldName) && isfield(expData.NetMet.(lagFieldName), fieldName)
-            nodeMetrics.(fieldName) = expData.NetMet.(lagFieldName).(fieldName);
+    netMetLag = expData.NetMet.(lagFieldName);
+    
+    % NODE-LEVEL METRICS (for 1_NodeByGroup and 2_NodeByAge)
+    nodeLevelData = struct();
+    
+    % Corrected field names from ExtractNetMet.m
+    nodeFields = {
+        'ND',           % Node degree
+        'MEW',          % Mean edge weight  
+        'NS',           % Node strength
+        'Eloc',         % Local efficiency
+        'Z',            % Within-module degree z-score
+        'BC',           % Betweenness centrality
+        'PC',           % Participation coefficient
+        'aveControl',   % Average controllability
+        'modalControl', % Modal controllability
+        'NE',           % Nodal efficiency
+        'activeChannel' % Active channel IDs
+    };
+    
+    for i = 1:length(nodeFields)
+        fieldName = nodeFields{i};
+        if isfield(netMetLag, fieldName)
+            nodeLevelData.(fieldName) = netMetLag.(fieldName);
         else
-            % If not available, create an empty array with correct dimensions
-            nodeMetrics.(fieldName) = zeros(channelCount, 1);
+            fprintf('Warning: Node metric %s not found for lag %.f\n', fieldName, lagVal);
         end
     end
     
-    % Add node coordinates and channels
+    % Add metadata
+    nodeLevelData.lagValue = lagVal;
+    nodeLevelData.expName = expName;
+    nodeLevelData.Grp = expData.Info.Grp;
+    nodeLevelData.DIV = expData.Info.DIV;
+    
+    % Add coordinates
     if isfield(expData, 'coords')
-        nodeMetrics.coords = expData.coords;
+        nodeLevelData.coords = expData.coords;
     end
     if isfield(expData, 'channels')
-        nodeMetrics.channels = expData.channels;
+        nodeLevelData.channels = expData.channels;
     elseif isfield(expData.Info, 'channels')
-        nodeMetrics.channels = expData.Info.channels;
+        nodeLevelData.channels = expData.Info.channels;
     end
     
-    % Save node metrics
-    nodeFilename = sprintf('%s_nodeMetrics_lag%.f.mat', expName, lagVal);
-    nodeFilePath = fullfile(saveFolder, nodeFilename);
-    save(nodeFilePath, 'nodeMetrics');
-    fprintf('Saved node metrics (lag %.f): %s\n', lagVal, nodeFilePath);
+    % Save node-level data
+    filename = sprintf('%s_nodeLevelMetrics_lag%.f.mat', expName, lagVal);
+    filePath = fullfile(saveFolder, filename);
+    save(filePath, 'nodeLevelData');
+    fprintf('Exported node-level metrics (lag %.f): %s\n', lagVal, filePath);
     
-    % Prepare network-level metrics
-    netMetrics = struct();
-    netMetricFields = {'density', 'efficiency_global', 'modularity', 'smallworldness'};
-    for mIdx = 1:length(netMetricFields)
-        fieldName = netMetricFields{mIdx};
-        metricFieldName = sprintf('%s%.fmslag', fieldName, lagVal);
-        if isfield(expData.NetMet, metricFieldName)
-            netMetrics.(fieldName) = expData.NetMet.(metricFieldName);
+    % NETWORK-LEVEL METRICS (for 3_RecordingsByGroup and 4_RecordingsByAge)
+    networkLevelData = struct();
+    
+    % All network-level metrics from ExtractNetMet.m
+    networkFields = {
+        'aN',               % Number of active nodes / network size
+        'Dens',             % Density
+        'NDmean',           % Mean node degree  
+        'NDtop25',          % Top 25% node degree
+        'sigEdgesMean',     % Significant edge weight mean
+        'sigEdgesTop10',    % Top 10% edge weight mean
+        'NSmean',           % Mean node strength
+        'ElocMean',         % Mean local efficiency
+        'CC',               % Clustering coefficient
+        'nMod',             % Number of modules
+        'Q',                % Modularity score
+        'percentZscoreGreaterThanZero',  % Percentage within-module z-score > 0
+        'percentZscoreLessThanZero',     % Percentage within-module z-score < 0  
+        'PL',               % Mean path length
+        'PCmean',           % Participation coefficient mean
+        'PCmeanBottom10',   % Bottom 10% PC
+        'PCmeanTop10',      % Top 10% PC
+        'Eglob',            % Global efficiency
+        'SW',               % Small-worldness sigma
+        'SWw',              % Small-worldness omega  
+        'aveControlMean',   % Mean average controllability
+        'BCmeantop5',       % Top 5% betweenness centrality
+        'Hub3',             % Hubs (3+ criteria)
+        'Hub4'              % Hubs (4 criteria)
+    };
+    
+    for i = 1:length(networkFields)
+        fieldName = networkFields{i};
+        if isfield(netMetLag, fieldName)
+            networkLevelData.(fieldName) = netMetLag.(fieldName);
+        else
+            fprintf('Warning: Network metric %s not found for lag %.f\n', fieldName, lagVal);
         end
     end
     
-    % Save network metrics
-    netFilename = sprintf('%s_networkMetrics_lag%.f.mat', expName, lagVal);
-    netFilePath = fullfile(saveFolder, netFilename);
-    save(netFilePath, 'netMetrics');
-    fprintf('Saved network metrics (lag %.f): %s\n', lagVal, netFilePath);
+    % Add lag-independent metrics (only for first lag)
+    if lagIdx == 1
+        lagIndependentFields = {
+            'num_nnmf_components',      % Number NMF components
+            'nComponentsRelNS',         % nNMF div network size  
+            'effRank'                   % Effective rank
+        };
+        
+        for i = 1:length(lagIndependentFields)
+            fieldName = lagIndependentFields{i};
+            if isfield(netMetLag, fieldName)
+                networkLevelData.(fieldName) = netMetLag.(fieldName);
+            end
+        end
+    end
+    
+    % Add metadata
+    networkLevelData.lagValue = lagVal;
+    networkLevelData.expName = expName;
+    networkLevelData.Grp = expData.Info.Grp;
+    networkLevelData.DIV = expData.Info.DIV;
+    if isfield(expData.Info, 'duration_s')
+        networkLevelData.duration_s = expData.Info.duration_s;
+    end
+    
+    % Save network-level data
+    filename = sprintf('%s_networkLevelMetrics_lag%.f.mat', expName, lagVal);
+    filePath = fullfile(saveFolder, filename);
+    save(filePath, 'networkLevelData');
+    fprintf('Exported network-level metrics (lag %.f): %s\n', lagVal, filePath);
 end
 end
 
 function exportNodeCartographyData(expData, expName, saveFolder, Params)
-% Export node cartography data
+% Export node cartography data for 6_NodeCartographyByLag plots
 
 if ~isfield(expData, 'NetMet')
     return;
 end
 
-% Export node cartography for each lag value
+% Export for each lag value
 for lagIdx = 1:length(Params.FuncConLagval)
     lagVal = Params.FuncConLagval(lagIdx);
+    lagFieldName = sprintf('adjM%.fmslag', lagVal);
     
-    % Check if we have node cartography data for this lag
-    hasCartography = false;
-    cartographyFields = {'z', 'p', 'nodal_roles'};
-    
-    for cIdx = 1:length(cartographyFields)
-        fieldName = cartographyFields{cIdx};
-        metricFieldName = sprintf('%s%.fmslag', fieldName, lagVal);
-        if isfield(expData.NetMet, metricFieldName)
-            hasCartography = true;
-            break;
-        end
-    end
-    
-    if ~hasCartography
+    if ~isfield(expData.NetMet, lagFieldName)
         continue;
     end
     
-    % Prepare cartography data
     cartographyData = struct();
     
-    for cIdx = 1:length(cartographyFields)
-        fieldName = cartographyFields{cIdx};
-        metricFieldName = sprintf('%s%.fmslag', fieldName, lagVal);
-        if isfield(expData.NetMet, metricFieldName)
-            cartographyData.(fieldName) = expData.NetMet.(metricFieldName);
+    % Node cartography metrics
+    cartographyFields = {
+        'Z',                % Within-module degree z-score
+        'PC',               % Participation coefficient  
+        'NCpn1',            % Peripheral nodes
+        'NCpn2',            % Non-hub connectors
+        'NCpn3',            % Non-hub kinless nodes
+        'NCpn4',            % Provincial hubs
+        'NCpn5',            % Connector hubs
+        'NCpn6',            % Kinless hubs
+        'Ci'                % Community affiliation
+    };
+    
+    netMetLag = expData.NetMet.(lagFieldName);
+    
+    for i = 1:length(cartographyFields)
+        fieldName = cartographyFields{i};
+        if isfield(netMetLag, fieldName)
+            cartographyData.(fieldName) = netMetLag.(fieldName);
         end
     end
     
-    % Add nodes and roles by region
-    roleFieldName = sprintf('NCpn%.fmslag', lagVal);
-    if isfield(expData.NetMet, roleFieldName)
-        cartographyData.roles = expData.NetMet.(roleFieldName);
-    end
-    
-    % Add boundary values
+    % Add boundary parameters (needed for node classification)
     cartographyData.boundaries = struct();
     boundaryNames = {'hubBoundaryWMdDeg', 'periPartCoef', 'proHubpartCoef', ...
-        'nonHubconnectorPartCoef', 'connectorHubPartCoef'};
+                     'nonHubconnectorPartCoef', 'connectorHubPartCoef'};
     
-    for bIdx = 1:length(boundaryNames)
-        boundaryFieldName = strcat(boundaryNames{bIdx}, sprintf('_%.fmsLag', lagVal));
-        if isfield(Params, boundaryFieldName)
-            cartographyData.boundaries.(boundaryNames{bIdx}) = Params.(boundaryFieldName);
+    % Check for lag-specific boundaries first
+    for i = 1:length(boundaryNames)
+        boundaryField = sprintf('%s_%.fmsLag', boundaryNames{i}, lagVal);
+        if isfield(Params, boundaryField)
+            cartographyData.boundaries.(boundaryNames{i}) = Params.(boundaryField);
+        elseif isfield(Params, boundaryNames{i})
+            cartographyData.boundaries.(boundaryNames{i}) = Params.(boundaryNames{i});
         end
     end
+    
+    % Add metadata
+    cartographyData.lagValue = lagVal;
+    cartographyData.expName = expName;
+    cartographyData.Grp = expData.Info.Grp;
+    cartographyData.DIV = expData.Info.DIV;
     
     % Add coordinates and channels
     if isfield(expData, 'coords')
@@ -375,9 +481,9 @@ for lagIdx = 1:length(Params.FuncConLagval)
     end
     
     % Save cartography data
-    filename = sprintf('%s_nodeCartography_lag%d.mat', expName, lagVal);
+    filename = sprintf('%s_nodeCartography_lag%.f.mat', expName, lagVal);
     filePath = fullfile(saveFolder, filename);
     save(filePath, 'cartographyData');
-    fprintf('Saved node cartography data (lag %d): %s\n', lagVal, filePath);
+    fprintf('Exported node cartography data (lag %.f): %s\n', lagVal, filePath);
 end
 end
